@@ -24,7 +24,6 @@ pub fn SpacialGrid(comptime thread_count: usize) type {
 if(thread_count == 0) @compileError("Thread count must be greater than 0\n");
 return struct {
     const Self = @This();
-
     pub const Config = struct {
         width: f32,
         height: f32,
@@ -59,7 +58,6 @@ return struct {
                 .height = config.height,
                 .rows = @intFromFloat(@ceil(config.height / config.cell_size)),
                 .cols = @intFromFloat(@ceil(config.width / config.cell_size)),
-                .cell_size = config.cell_size,
                 .ent_count = config.ent_count,
                 .allocator = config.allocator,
                 .buf_capacity = config.ent_count,
@@ -177,6 +175,7 @@ return struct {
         const shape_data = collision_data.shape_data;
 
         if(indices.len > self.impl.buf_capacity) try self.resizeBuffers(indices.len);
+        
         self.insert(indices, positions);
 
         self.results.clearRetainingCapacity();
@@ -264,6 +263,31 @@ return struct {
         self.impl.indices = try self.impl.allocator.alloc(usize, new_cap);
         for(&self.impl.query_bufs) |*buf| buf.* = try self.impl.allocator.alloc(usize, new_cap);
     }
+    
+    /// Set the size of the SpacialGrid's cells to largest entity multiplied by N 
+    pub fn setCellSize(self: *Self, shape_data: []ShapeData, n: f32) !void {
+        if(n < 1) @panic("n is less than 1\n");
 
+        const cell_size: f32 = blk: {
+            var largest: f32 = 0.0;
+            for(shape_data) |shape| {
+                const size = switch(shape) {
+                    .Circle => |r| r * 2 * n,
+                    .Rect => |dim| @max(dim.x, dim.y) * n,
+                    .Point => 0,
+                };
+
+                if(size > largest) largest = size;
+            }
+            if(largest == 0) largest = 1;
+            break :blk largest;
+        };
+
+        self.impl.cell_size = cell_size;
+        self.impl.rows = @intFromFloat(@ceil(self.impl.height / self.impl.cell_size));
+        self.impl.cols = @intFromFloat(@ceil(self.impl.width / self.impl.cell_size));
+        self.impl.allocator.free(self.impl.counts);
+        self.impl.counts = try self.impl.allocator.alloc(usize, self.impl.rows * self.impl.cols);
+    }
 };
 }
