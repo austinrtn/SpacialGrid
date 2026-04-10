@@ -14,13 +14,6 @@ pub const Vector2 = struct{
     }
 };
 
-pub const Config = struct {
-    width: i32,
-    height: i32,
-    cell_size: f32,
-    ent_count: usize, 
-    allocator: std.mem.Allocator,
-};
 
 pub const CollisionData = struct {
     indecies: []usize,
@@ -28,16 +21,27 @@ pub const CollisionData = struct {
     shape_data: []ShapeData,
 };
 
-pub const ShapeData = union{
+pub const ShapeType = enum { Point, Rect, Circle};
+pub const ShapeData = union(ShapeType){
     Point: void,
-    Rect: struct {w: f32, h: f32},
+    Rect: Vector2,
     Circle: f32,
 };
 
-pub const SpacialGrid = struct {
+pub fn SpacialGrid(comptime thread_count: usize) type {
+return struct {
+    const Self = @This();
     pub const CollisionPair = struct {
         a: usize,
         b: usize,
+    };
+
+    pub const Config = struct {
+        width: f32,
+        height: f32,
+        cell_size: f32,
+        ent_count: usize, 
+        allocator: std.mem.Allocator,
     };
 
     width: f32,
@@ -50,16 +54,16 @@ pub const SpacialGrid = struct {
 
     counts: []usize = undefined,
     indecies: []usize = undefined,
-    thread_lists: [4]std.ArrayList(CollisionPair) = undefined,
+    thread_lists: [thread_count]std.ArrayList(CollisionPair) = undefined,
     all_collisions: std.ArrayList(CollisionPair) = .empty,
-    query_bufs: [4][]usize = undefined,
+    query_bufs: [thread_count][]usize = undefined,
 
-    pub fn init (config: Config) !SpacialGrid {
-        var self = SpacialGrid {
+    pub fn init (config: Config) !Self {
+        var self = Self {
             .width = config.width,
             .height = config.height,
-            .rows = @ceil(@as(f32, @floatFromInt(config.height)) / config.cell_size),
-            .cols = @ceil(@as(f32, @floatFromInt(config.width)) / config.cell_size),
+            .rows = @intFromFloat(@ceil(config.height / config.cell_size)),
+            .cols = @intFromFloat(@ceil(config.width / config.cell_size)),
             .cell_size = config.cell_size,
             .ent_count = config.ent_count,
             .allocator = config.allocator,
@@ -83,7 +87,7 @@ pub const SpacialGrid = struct {
         return self;
     }
 
-    pub fn deinit(self: *SpacialGrid) void {
+    pub fn deinit(self: *Self) void {
         self.allocator.free(self.counts);
         self.allocator.free(self.indecies);
         for(&self.thread_lists) |*list| {
@@ -95,7 +99,7 @@ pub const SpacialGrid = struct {
         }
     }
 
-    fn insert(self: *SpacialGrid, ids: []usize, positions: []Vector2) void {
+    fn insert(self: *Self, ids: []usize, positions: []Vector2) void {
         @memset(self.counts, 0);
         for(positions) |pos| {
             const cell = self.getCellPos(pos) catch continue;
@@ -117,7 +121,7 @@ pub const SpacialGrid = struct {
         }
     }
 
-    pub fn query(self: *SpacialGrid, pos: Vector2, buf: []usize) ![]usize {
+    pub fn query(self: *Self, pos: Vector2, buf: []usize) ![]usize {
         const cell_pos = try self.getCellPos(pos);
 
         var len: usize = 0;
@@ -139,7 +143,7 @@ pub const SpacialGrid = struct {
         return buf[0..len];
     }
 
-    fn getCellPos(self: SpacialGrid, pos: Vector2) !struct{row: usize, col: usize, idx: usize} {
+    fn getCellPos(self: Self, pos: Vector2) !struct{row: usize, col: usize, idx: usize} {
         const row: i32 = @intFromFloat(@floor(pos.y / self.cell_size));
         const col: i32 = @intFromFloat(@floor(pos.x / self.cell_size));
 
@@ -155,7 +159,7 @@ pub const SpacialGrid = struct {
         };
     }
 
-    fn getNeighborCellIndex(self: SpacialGrid, row: usize, row_offset: i32, col: usize, col_offset: i32) !usize {
+    fn getNeighborCellIndex(self: Self, row: usize, row_offset: i32, col: usize, col_offset: i32) !usize {
         const row_val: i32 = @as(i32, @intCast(row)) + row_offset;
         const col_val: i32 = @as(i32, @intCast(col)) + col_offset;
 
@@ -163,9 +167,10 @@ pub const SpacialGrid = struct {
         return @as(usize, @intCast(row_val)) * self.cols + @as(usize, @intCast(col_val));
     }
 
-    pub fn update(self: *SpacialGrid, collision_data: CollisionData) ![]CollisionPair{
+    pub fn update(self: *Self, collision_data: CollisionData) ![]CollisionPair{
         const indecies = collision_data.indecies;
         const positions = collision_data.positions;
+        const shape_data = collision_data.shape_data;
         
         self.insert(indecies, positions);
 
@@ -174,50 +179,30 @@ pub const SpacialGrid = struct {
             list.clearRetainingCapacity();
         }
 
-        const slice_unit: usize = indecies.len / 4;
+        const slice_unit: usize = indecies.len / thread_count;
 
-        const find_cols = struct {
-            fn func(
-                grid: *SpacialGrid, 
-                chunk_ids: []usize, 
-                all_positions: []Vector2, 
-                all_radii: []f32, 
-                col_list: *std.ArrayList(CollisionPair), 
-                query_buf: []usize
-            ) void {
-                for(chunk_ids) |id_a| {
-                    const pos_a = all_positions[id_a];
-                    const r_a = all_radii[id_a];
-
-                    const nearby = grid.query(pos_a, query_buf) catch continue;
-
-                    for(nearby) |id_b| {
-                        if(id_a >= id_b) continue;
-
-                        const pos_b = all_positions[id_b];
-                        const r_b = all_radii[id_b];
-
-                        if(SpacialGrid.colliding(pos_a, r_a, pos_b, r_b)){
-                            col_list.append(grid.allocator, .{ .a = id_a, .b = id_b }) catch continue;
-                        }
-                    }
-                }
+        const chunks = blk: {
+            const slices: [thread_count][]usize = undefined;
+            for(0..slices.len) |i| {
+                if(i == slices.len - 1) slices[i] = indecies[slice_unit * i..]
+                else if(i == 0) slices[i] = indecies[0..(slice_unit * i + 1)]
+                //else 
             }
         };
 
-        const slices = [4][]usize{
+        const slices = [thread_count][]usize{
             indecies[0..slice_unit],
             indecies[slice_unit..slice_unit * 2],
             indecies[slice_unit * 2..slice_unit * 3],
             indecies[slice_unit * 3..],
         };
 
-        var threads: [4]std.Thread = undefined;
+        var threads: [thread_count]std.Thread = undefined;
         for(slices, 0..) |chunk, i| {
             threads[i] = try std.Thread.spawn(
                 .{.allocator = self.allocator},
-                find_cols.func,
-                .{self, chunk, positions, radii, &self.thread_lists[i], self.query_bufs[i]}
+                findCollisions,
+                .{self, chunk, positions, shape_data, &self.thread_lists[i], self.query_bufs[i]}
             );
         }
 
@@ -232,8 +217,8 @@ pub const SpacialGrid = struct {
         return try self.all_collisions.toOwnedSlice(self.allocator);
     }
 
-    fn findNeighbors(
-        grid: *SpacialGrid, 
+    fn findCollisions(
+        grid: *Self, 
         indecies: []usize, 
         positions: []Vector2, 
         shape_data: []ShapeData, 
@@ -252,7 +237,7 @@ pub const SpacialGrid = struct {
                 const pos_b = positions[id_b];
                 const shape_b = shape_data[id_b];
 
-                if(SpacialGrid.colliding(pos_a, shape_a, pos_b, shape_b)) {
+                if(checkColliding(pos_a, shape_a, pos_b, shape_b)) {
                     col_list.append(grid.allocator, .{ .a = id_a, .b = id_b }) catch continue;
                 }
             }
@@ -260,14 +245,14 @@ pub const SpacialGrid = struct {
     }
 
     pub fn checkColliding(pos_a: Vector2, shape_a: ShapeData, pos_b: Vector2, shape_b: ShapeData) bool {
-        switch (shape_a) {
+        return switch (shape_a) {
             .Circle => |r1| switch(shape_b) {
                 .Circle => |r2| circleCollision(pos_a, r1, pos_b, r2), 
                 .Rect => |dim| rectCircleCollision(pos_b, dim, pos_a, r1), 
                 .Point => pointCircleCollision(pos_a, r1, pos_b),
             },
             .Rect => |dim1| switch(shape_b) {
-                .Circle => |r| circleCollision(pos_b, r, pos_a, dim1), 
+                .Circle => |r| rectCircleCollision(pos_a, dim1, pos_b, r), 
                 .Rect => |dim2| rectCollision(pos_a, dim1, pos_b, dim2), 
                 .Point => pointRectCollision(pos_a, dim1, pos_b)
             },
@@ -276,10 +261,10 @@ pub const SpacialGrid = struct {
                 .Rect => |dim| pointRectCollision(pos_b, dim, pos_a),
                 .Point => pointCollision(pos_b, pos_a),
             }
-        }
+        };
     }
 
-    /// Get distance between two circles.  
+    /// Check collision between two circles.  
     pub fn circleCollision(pos_a: Vector2, r_a: f32, pos_b: Vector2, r_b: f32) bool {
         const dist = Vector2.getDistanceSq(pos_a, pos_b);
         const r = r_a + r_b;
@@ -287,7 +272,7 @@ pub const SpacialGrid = struct {
         return dist < (r * r);
     }
 
-    /// Get distance between two Rectangles.  Assumes coordinates start at top left of rect.
+    /// Check collision between two Rectangles.  Assumes coordinates start at top left of rect.
     pub fn rectCollision(pos_a: Vector2, dim_a: Vector2, pos_b: Vector2, dim_b: Vector2) bool {
         return (
             (pos_a.x < pos_b.x + dim_b.x and pos_a.x + dim_a.x > pos_b.x) 
@@ -296,24 +281,35 @@ pub const SpacialGrid = struct {
         );
     }
 
+    /// Check collision between two points (if both points are equal).
     pub fn pointCollision(point1: Vector2, point2: Vector2) bool {
         return Vector2.eql(point1, point2);
     }
 
+    /// Check collision between a circle and a rectangle.  Assumes coordinates start at top left for rectangle.
     pub fn rectCircleCollision(rect_pos: Vector2, rect_dim: Vector2, circle_pos: Vector2, r: f32) bool {
-        _ = rect_pos; _ = rect_dim; _ = circle_pos; _ = r;
+        const closest_x = @max(rect_pos.x, @min(circle_pos.x, rect_pos.x + rect_dim.x));
+        const closest_y = @max(rect_pos.y, @min(circle_pos.y, rect_pos.y + rect_dim.y));
+
+        const dx = circle_pos.x - closest_x;
+        const dy = circle_pos.y - closest_y;
+
+        return (dx * dx + dy * dy) < (r * r);
     }
 
+    /// Check collision between a circle and a point
     pub fn pointCircleCollision(pos_a: Vector2, r: f32, point: Vector2) bool {
         const dist = Vector2.getDistanceSq(point, pos_a);
         return (dist < r * r);
     }
 
-
+    /// Check collision between a rectangle and a point
     pub fn pointRectCollision(pos_a: Vector2, dim: Vector2, point: Vector2) bool {
-        _ = pos_a; _ = r; _ = point;
+        return (
+            (point.x >= pos_a.x and point.x <= pos_a.x + dim.x)
+                                and
+            (point.y >= pos_a.y and point.y <= pos_a.y + dim.y)
+        );
     }
-
 };
-
-
+}
