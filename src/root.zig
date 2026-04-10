@@ -1,7 +1,10 @@
 const std = @import("std");
 const Io = std.Io;
 
-const Lib = @import("SpacialGrid.zig");
-pub const SpacialGrid = Lib.SpacialGrid;
-pub const Vector2 = Lib.Vector2;
-pub const ShapeData = Lib.ShapeData;
+const SG = @import("SpacialGrid.zig");
+
+pub const Vector2 = @import("Vector2.zig").Vector2;
+pub const CollisionDetection = @import("CollisionDetection.zig");
+pub const SpacialGrid = SG.SpacialGrid;
+pub const ShapeData = SG.ShapeData;
+pub const CollisionPair = SG.CollisionPair;
