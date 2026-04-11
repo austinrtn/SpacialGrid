@@ -65,6 +65,7 @@ return struct {
         allocator: std.mem.Allocator,
         io: std.Io,
         ent_count: usize = 0,
+        auto_cell_resize: bool = true,
     };
 
     const Impl = struct {
@@ -81,6 +82,7 @@ return struct {
         counts: []usize,
         indices: []usize,
         buf_capacity: usize,
+        auto_cell_resize: bool = true,
         workers: [thread_count]Worker(setup) = undefined,
     };
 
@@ -102,6 +104,7 @@ return struct {
                 .counts = undefined,
                 .indices = undefined,
                 .workers = undefined,
+                .auto_cell_resize = config.auto_cell_resize,
             },
         };
 
@@ -120,14 +123,16 @@ return struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.impl.allocator.free(self.impl.counts);
-        self.impl.allocator.free(self.impl.indices);
+        const allocator = self.impl.allocator;
+        allocator.free(self.impl.counts);
+        allocator.free(self.impl.indices);
 
         for(&self.impl.workers) |*w| {
             w.deinit();
         }
 
         self.results.deinit(self.impl.allocator);
+        allocator.destroy(self);
     }
 
     fn insert(self: *Self, ids: []usize, positions: []Vec2) void {
@@ -198,10 +203,10 @@ return struct {
         return @as(usize, @intCast(row_val)) * self.impl.cols + @as(usize, @intCast(col_val));
     }
 
-    pub fn update(self: *Self, collision_data: CollisionD, auto_cell_resize: bool) !void {
+    pub fn update(self: *Self, collision_data: CollisionD) !void {
         const workers = &self.impl.workers;
         
-        if(!auto_cell_resize and !self.impl.cell_size_set) {
+        if(!self.impl.auto_cell_resize and !self.impl.cell_size_set) {
             std.log.err(
             "Must call SpacialGrid.setCellSize before calling SpacialGrid.update"
             , .{});
@@ -211,9 +216,9 @@ return struct {
         const positions = collision_data.positions;
         const shape_data = collision_data.shape_data;
 
-        if(indices.len > self.impl.buf_capacity or (auto_cell_resize and !self.impl.cell_size_set)) {
+        if(indices.len > self.impl.buf_capacity or (self.impl.auto_cell_resize and !self.impl.cell_size_set)) {
             try self.resizeBuffers(indices.len);
-            if(auto_cell_resize) try self.setCellSize(shape_data, 2);
+            if(self.impl.auto_cell_resize) try self.setCellSize(shape_data, 2);
         }
 
         self.results.clearRetainingCapacity();

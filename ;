@@ -7,12 +7,8 @@ const Vector2 = SpacialGrid.Vector2;
 const ShapeData = SpacialGrid.ShapeData;
 const Entity = SpacialGrid.Entity;
 
-const Config = struct {
-    world_w: f32 = 1000, 
-    world_h: f32 = 1000,
-    max_frames: usize = 5000,
-    ent_count: usize,
-};
+const world_w = 10_000;
+const world_h = 10_000;
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
@@ -26,8 +22,6 @@ pub fn main(init: std.process.Init) !void {
         .io = init.io,
     });
     defer grid.deinit();
-
-    const args = parseArgs(init.minimal.args);
 
     var ents: std.MultiArrayList(Entity) = .empty;
     defer ents.deinit(allocator);
@@ -67,18 +61,4 @@ pub fn main(init: std.process.Init) !void {
     }
 }
 
-fn parseArgs(allocator: std.mem.Allocator, args: std.process.Args) Config {
-    var config: Config = .{};
-    var iter = try args.iterateAllocator(allocator);
-    defer iter.deinit();
-    _ = iter.next();
 
-    while(iter.next()) |arg| {
-        if(std.mem.startsWith(u8, arg, "w=")) {
-            const stripped = std.mem.trimStart(u8, arg, "w="); 
-            config.world_w = try std.fmt.parseFloat(f32, stripped);
-        }
-    }
-
-    return config;
-}
