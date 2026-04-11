@@ -1,70 +1,107 @@
 const std = @import("std");
-const CollisionDetection = @import("CollisionDetection.zig");
+const CollisionDetection = @import("CollisionDetection.zig").CollisionDetection;
 const Vector2 = @import("Vector2.zig").Vector2;
+const Worker = @import("Woker.zig").Worker;
 
 pub const ShapeType = enum { Point, Rect, Circle};
-pub const ShapeData = union(ShapeType){
-    Point: void,
-    Rect: Vector2,
-    Circle: f32,
-};
+pub fn ShapeData(comptime Vec2: type) type {
+    if(!@hasField(Vec2, "x") or !@hasField(Vec2, "y")) {
+        @compileError("Vector2 type must contain both fields x and y");
+    }
 
-pub const CollisionData = struct {
-    indices: []usize,
-    positions: []Vector2,
-    shape_data: []ShapeData,
-};
+    return union(ShapeType){
+        Point: void,
+        Rect: Vec2,
+        Circle: f32,
+    };
+}
+
+pub fn CollisionData(comptime Vec2: type) type { 
+    if(!@hasField(Vec2, "x") or !@hasField(Vec2, "y")) {
+        @compileError("Vector2 type must contain both fields x and y");
+    }
+
+    return struct {
+        indices: []usize,
+        positions: []Vec2,
+        shape_data: []ShapeData(Vec2),
+    };
+}
 
 pub const CollisionPair = struct {
     a: usize,
     b: usize,
 };
 
-pub fn SpacialGrid(comptime thread_count: usize) type {
-if(thread_count == 0) @compileError("Thread count must be greater than 0\n");
+pub const SpacialGridSetup = struct{thread_count: usize = 1, Vector2: type = Vector2};
+pub fn SpacialGrid(comptime setup: SpacialGridSetup) type {
+    const thread_count = if(setup.thread_count == 0) 1 else setup.thread_count;
+    const Vec2 = setup.Vector2;
+    const Shape = ShapeData(Vec2);
+    const CollisionD = CollisionData(Vec2);
+
+    if(!@hasField(Vec2, "x") or !@hasField(Vec2, "y")) {
+        @compileError("Vector2 type must contain both fields x and y");
+    }
+
 return struct {
+    pub const Vector2 = Vec2;
+    pub const ShapeData = Shape;
+    pub const Entity = struct {
+        pos: Vec2,
+        shape_data: Shape,
+        id: usize,
+
+        pub fn init(pos: Vec2, shape_data: Shape, id: usize) Entity {
+            return .{.pos = pos, .shape_data = shape_data, .id = id};
+        }
+    };
+
     const Self = @This();
     pub const Config = struct {
         width: f32,
         height: f32,
         cell_size: f32,
-        ent_count: usize,
         allocator: std.mem.Allocator,
+        io: std.Io,
+        ent_count: usize = 0,
     };
 
     const Impl = struct {
+        allocator: std.mem.Allocator,
+        io: std.Io,
         width: f32,
         height: f32,
         rows: usize,
         cols: usize,
-        cell_size: f32,
+        cell_size: f32 = 1.0,
+        cell_size_set: bool = false,
         ent_count: usize,
-        allocator: std.mem.Allocator,
 
         counts: []usize,
         indices: []usize,
         buf_capacity: usize,
-        thread_lists: [thread_count]std.ArrayList(CollisionPair),
-        query_bufs: [thread_count][]usize,
+        workers: [thread_count]Worker(setup) = undefined,
     };
 
     impl: Impl,
     results: std.ArrayList(CollisionPair) = .empty,
 
-    pub fn init(config: Config) !Self {
-        var self = Self{
+    pub fn init(config: Config) !*Self {
+        const self = try config.allocator.create(Self);
+        self.* = Self {
             .impl = .{
+                .allocator = config.allocator,
+                .io = config.io,
                 .width = config.width,
                 .height = config.height,
                 .rows = @intFromFloat(@ceil(config.height / config.cell_size)),
                 .cols = @intFromFloat(@ceil(config.width / config.cell_size)),
                 .ent_count = config.ent_count,
-                .allocator = config.allocator,
                 .buf_capacity = config.ent_count,
                 .counts = undefined,
                 .indices = undefined,
-                .thread_lists = undefined,
-                .query_bufs = undefined,
+                .workers = undefined,
             },
         };
 
@@ -72,16 +109,12 @@ return struct {
         self.impl.counts = try self.impl.allocator.alloc(usize, self.impl.rows * self.impl.cols);
         @memset(self.impl.counts, 0);
 
-        const initial_cap = self.impl.ent_count / 4;
-        for(&self.impl.thread_lists) |*list| {
-            list.* = .empty;
-            try list.ensureTotalCapacity(self.impl.allocator, initial_cap);
+        for(&self.impl.workers) |*w| { 
+            w.* = try Worker(setup).init(self, self.impl.buf_capacity); 
+            try w.spawn();
         }
-        try self.results.ensureTotalCapacity(self.impl.allocator, self.impl.ent_count);
 
-        for(&self.impl.query_bufs) |*buf| {
-            buf.* = try self.impl.allocator.alloc(usize, self.impl.buf_capacity);
-        }
+        try self.results.ensureTotalCapacity(self.impl.allocator, self.impl.ent_count);
 
         return self;
     }
@@ -90,18 +123,14 @@ return struct {
         self.impl.allocator.free(self.impl.counts);
         self.impl.allocator.free(self.impl.indices);
 
-        for(&self.impl.thread_lists) |*list| {
-            list.deinit(self.impl.allocator);
+        for(&self.impl.workers) |*w| {
+            w.deinit();
         }
 
         self.results.deinit(self.impl.allocator);
-
-        for(&self.impl.query_bufs) |*buf| {
-            self.impl.allocator.free(buf.*);
-        }
     }
 
-    fn insert(self: *Self, ids: []usize, positions: []Vector2) void {
+    fn insert(self: *Self, ids: []usize, positions: []Vec2) void {
         @memset(self.impl.counts, 0);
         for(positions) |pos| {
             const cell = self.getCellPos(pos) catch continue;
@@ -123,7 +152,7 @@ return struct {
         }
     }
 
-    fn query(self: *Self, pos: Vector2, buf: []usize) ![]usize {
+    fn query(self: *Self, pos: Vec2, buf: []usize) ![]usize {
         const cell_pos = try self.getCellPos(pos);
 
         var len: usize = 0;
@@ -145,7 +174,7 @@ return struct {
         return buf[0..len];
     }
 
-    fn getCellPos(self: Self, pos: Vector2) !struct{row: usize, col: usize, idx: usize} {
+    fn getCellPos(self: Self, pos: Vec2) !struct{row: usize, col: usize, idx: usize} {
         const row: i32 = @intFromFloat(@floor(pos.y / self.impl.cell_size));
         const col: i32 = @intFromFloat(@floor(pos.x / self.impl.cell_size));
 
@@ -169,27 +198,35 @@ return struct {
         return @as(usize, @intCast(row_val)) * self.impl.cols + @as(usize, @intCast(col_val));
     }
 
-    pub fn update(self: *Self, collision_data: CollisionData) !void {
+    pub fn update(self: *Self, collision_data: CollisionD, auto_cell_resize: bool) !void {
+        const workers = &self.impl.workers;
+        
+        if(!auto_cell_resize and !self.impl.cell_size_set) {
+            std.log.err(
+            "Must call SpacialGrid.setCellSize before calling SpacialGrid.update"
+            , .{});
+            return error.CellSizeNotSet;
+        }
         const indices = collision_data.indices;
         const positions = collision_data.positions;
         const shape_data = collision_data.shape_data;
 
-        if(indices.len > self.impl.buf_capacity) try self.resizeBuffers(indices.len);
-        
-        self.insert(indices, positions);
-
-        self.results.clearRetainingCapacity();
-
-        for(&self.impl.thread_lists) |*list| {
-            list.clearRetainingCapacity();
+        if(indices.len > self.impl.buf_capacity or (auto_cell_resize and !self.impl.cell_size_set)) {
+            try self.resizeBuffers(indices.len);
+            if(auto_cell_resize) try self.setCellSize(shape_data, 2);
         }
 
-        // If the amount of entities is less than the thread count,
-        // run single threaded.  Trying to run more threads than entities
-        // creates out of bounds arrays during the chunk generation below
-        if(indices.len < thread_count or thread_count == 1) {
-            findCollisions(self, indices, positions, shape_data, &self.impl.thread_lists[0], self.impl.query_bufs[0]);
-            try self.results.appendSlice(self.impl.allocator, self.impl.thread_lists[0].items);
+        self.results.clearRetainingCapacity();
+        self.insert(indices, positions);
+
+        if(thread_count == 1 or indices.len < thread_count) {
+            const col_list = &workers[0].col_list;
+            const query_buf = workers[0].query_buf;
+
+            col_list.clearRetainingCapacity();
+
+            findCollisions(self, indices, positions, shape_data, col_list, query_buf);
+            try self.results.appendSlice(self.impl.allocator, col_list.items);
             return;
         }
 
@@ -201,36 +238,29 @@ return struct {
             var slices: [thread_count][]usize = undefined;
             for(0..slices.len) |i| {
                 const start = slice_unit * i;
-                const end = if(i == slices.len - 1) indices.len else slice_unit * (i + 1);
-                slices[i] = indices[start..end];
+                const end = if(i == slices.len - 1) indices.len else slice_unit * (i + 1); slices[i] = indices[start..end];
             }
             break :blk slices;
         };
 
-        // Spawn new threads
-        var threads: [thread_count]std.Thread = undefined;
-        for(chunks, 0..) |chunk, i| {
-            threads[i] = try std.Thread.spawn(
-                .{.allocator = self.impl.allocator},
-                findCollisions,
-                .{self, chunk, positions, shape_data, &self.impl.thread_lists[i], self.impl.query_bufs[i]}
-            );
+        for(workers, chunks) |*w, chunk| {
+            w.col_list.clearRetainingCapacity();
+
+            w.set(chunk, positions, shape_data);
+            w.work_semaphore.post(self.impl.io);
         }
 
-        for(threads) |t| {
-            t.join();
-        }
-
-        for(&self.impl.thread_lists) |*list| {
-            try self.results.appendSlice(self.impl.allocator, list.items);
+        for(workers) |*w| {
+            w.done_semaphore.wait(self.impl.io) catch continue; 
+            try self.results.appendSlice(self.impl.allocator, w.col_list.items);
         }
     }
 
-    fn findCollisions(
+    pub fn findCollisions(
         grid: *Self,
         indices: []usize,
-        positions: []Vector2,
-        shape_data: []ShapeData,
+        positions: []Vec2,
+        shape_data: []Shape,
         col_list: *std.ArrayList(CollisionPair),
         query_buf: []usize
     ) void {
@@ -246,7 +276,7 @@ return struct {
                 const pos_b = positions[id_b];
                 const shape_b = shape_data[id_b];
 
-                if(CollisionDetection.checkColliding(pos_a, shape_a, pos_b, shape_b)) {
+                if(CollisionDetection(Vec2).checkColliding(pos_a, shape_a, pos_b, shape_b)) {
                     col_list.append(grid.impl.allocator, .{ .a = id_a, .b = id_b }) catch continue;
                 }
             }
@@ -256,16 +286,16 @@ return struct {
     /// Allocate new buffers to accommodate new entity count
     fn resizeBuffers(self: *Self, new_len: usize) !void {
         self.impl.allocator.free(self.impl.indices);
-        for(&self.impl.query_bufs) |*buf| self.impl.allocator.free(buf.*);
+        for(&self.impl.workers) |*w| w.allocator.free(w.query_buf);
 
         const new_cap = @max(new_len, self.impl.buf_capacity * 2);
         self.impl.buf_capacity = new_cap;
         self.impl.indices = try self.impl.allocator.alloc(usize, new_cap);
-        for(&self.impl.query_bufs) |*buf| buf.* = try self.impl.allocator.alloc(usize, new_cap);
+        for(&self.impl.workers) |*w| w.query_buf = try w.allocator.alloc(usize, new_cap);
     }
     
     /// Set the size of the SpacialGrid's cells to largest entity multiplied by N 
-    pub fn setCellSize(self: *Self, shape_data: []ShapeData, n: f32) !void {
+    pub fn setCellSize(self: *Self, shape_data: []Shape, n: f32) !void {
         if(n < 1) @panic("n is less than 1\n");
 
         const cell_size: f32 = blk: {
@@ -288,6 +318,7 @@ return struct {
         self.impl.cols = @intFromFloat(@ceil(self.impl.width / self.impl.cell_size));
         self.impl.allocator.free(self.impl.counts);
         self.impl.counts = try self.impl.allocator.alloc(usize, self.impl.rows * self.impl.cols);
+        self.impl.cell_size_set = true;
     }
 };
 }

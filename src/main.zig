@@ -1,35 +1,33 @@
 const std = @import("std");
 const Io = std.Io;
 const Lib = @import("SpacialGrid");
-const Vector2 = Lib.Vector2;
 
-const SpacialGrid = Lib.SpacialGrid(4);
-const ShapeData = Lib.ShapeData;
+const SpacialGrid = Lib.SpacialGrid(.{.thread_count = 4});
+const Vector2 = SpacialGrid.Vector2;
+const ShapeData = SpacialGrid.ShapeData;
+const Entity = SpacialGrid.Entity;
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
 
-    var grid: SpacialGrid = try .init(SpacialGrid.Config{
+    var grid: *SpacialGrid = try .init(SpacialGrid.Config{
         .allocator = init.gpa,
         .cell_size = 25,
         .ent_count = 4,
         .width = 100,
         .height = 100,
+        .io = init.io,
     });
     defer grid.deinit();
 
-    var ents: std.MultiArrayList(struct {
-        pos: Vector2,
-        shape_data: ShapeData,
-        id: usize,
-    }) = .empty;
+    var ents: std.MultiArrayList(Entity) = .empty;
     defer ents.deinit(allocator);
 
-    try ents.append(allocator, .{
-        .pos = .{.x = 25, .y = 25},
-        .shape_data = .{ .Circle = 12},
-        .id = 0,
-    });
+    try ents.append(allocator, Entity.init(
+        .{ .x = 25, .y = 25 },
+        .{ .Circle = 12.0 },
+         0,
+    ));
 
     try ents.append(allocator, .{
         .pos = .{.x = 20, .y = 20},
@@ -43,12 +41,17 @@ pub fn main(init: std.process.Init) !void {
         .id = 0,
     });
 
+    try grid.setCellSize(ents.items(.shape_data), 2);
     const max_frames: usize = 5000;
     var i: usize = 0;
     while(true) : (i += 1){
         try grid.update(.{
-            .positions = ents.items(.pos), .shape_data = ents.items(.shape_data), .indices = ents.items(.id)
-        });            
+            .positions = ents.items(.pos), 
+            .shape_data = ents.items(.shape_data), 
+            .indices = ents.items(.id)
+        },
+        false,
+        );            
 
         const results = grid.results.items;
         const found_col = results.len > 0;
@@ -74,3 +77,5 @@ pub fn main(init: std.process.Init) !void {
         if(i == max_frames) break;
     }
 }
+
+
