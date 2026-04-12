@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 const Io = std.Io;
 const Lib = @import("SpacialGrid");
 
-const THREAD_COUNT = 6;
+const THREAD_COUNT = 1;
 const SpacialGrid = Lib.SpacialGrid(.{.thread_count = THREAD_COUNT});
 const Vector2   = SpacialGrid.Vector2;
 const ShapeData = SpacialGrid.ShapeData;
@@ -82,7 +82,6 @@ pub fn main(init: std.process.Init) !void {
     var prng = Lib.getPrng(init.io);
     
     const Clock = std.Io.Clock;
-    const start = Clock.Timestamp.now(init.io, .awake);
 
     var frames: std.ArrayList(FrameMeteric) = .empty;
     defer frames.deinit(allocator);
@@ -90,12 +89,32 @@ pub fn main(init: std.process.Init) !void {
     try writer.writeAll("Starting sim...\n");
     try writer.flush();
 
+    var profiler = struct {
+        collision: std.ArrayList(i128) = .empty,
+        query: std.ArrayList(i128) = .empty,
+        insert: std.ArrayList(i128) = .empty,
+        cell_max: std.ArrayList(usize) = .empty,
+        hits: usize = 0,
+
+        fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
+            self.collision.deinit(alloc);
+            self.query.deinit(alloc);
+            self.insert.deinit(alloc);
+            self.cell_max.deinit(alloc);
+        }
+    }{};
+    defer profiler.deinit(allocator);
+
+
+    const start = Clock.Timestamp.now(init.io, .awake);
     var i: usize = 0;
+    // UPDATE LOOP
     while(true) : (i += 1){
         if(config.update_stdout and i > 0) {
             const last_frame = frames.items[i - 1];
-            try writer.print("Frame: {} | Time: {} \r", 
-                .{ last_frame.frame, last_frame.frame_time }
+            const elapsed = start.durationTo(Clock.Timestamp.now(init.io, .awake));
+            try writer.print("Frame: {} | FrameTime: {} | Elapsed: {}\r", 
+                .{ last_frame.frame, last_frame.frame_time, elapsed.raw.toSeconds()}
             );
             try writer.flush();
         }
@@ -111,7 +130,9 @@ pub fn main(init: std.process.Init) !void {
                 .positions = ents.items(.pos),
                 .shape_data = ents.items(.shape_data),
                 .indices = ents.items(.id)
-            });
+            },
+            &profiler,
+            );
         }
 
         const end_query = start_query.durationTo
@@ -131,7 +152,7 @@ pub fn main(init: std.process.Init) !void {
         if(elapsed.raw.toSeconds() >= config.timeout) break;
     }
 
-    try printStats(writer, init.io, config, frames.items);
+    try printStats(writer, init.io, config, frames.items, &profiler);
     try writer.flush();
 }
 
@@ -241,7 +262,7 @@ fn naiveCollisions(allocator: std.mem.Allocator, positions: []Vector2, shape_dat
     }
 }
 
-fn printStats(writer: anytype, io: std.Io, config: Config, frames: []const FrameMeteric) !void {
+fn printStats(writer: anytype, io: std.Io, config: Config, frames: []const FrameMeteric, profiler: anytype) !void {
     try writer.writeAll("\n\n--- Results ---\n");
     try writer.print("Time: {}\n", .{std.Io.Clock.Timestamp.now(io, .awake).raw.toMilliseconds()});
     try writer.print("Build: {s}\n", .{@tagName(builtin.mode)});
@@ -277,9 +298,48 @@ fn printStats(writer: anytype, io: std.Io, config: Config, frames: []const Frame
     const avg_time = @divTrunc(total_time, n);
     const avg_dist = total_dist / @as(f32, @floatFromInt(frames.len));
 
-    try writer.print("Frames  : {}\n",                                      .{frames.len});
-    try writer.print("Threads:  {}\n",                                      .{THREAD_COUNT});
-    try writer.print("Time    : avg {}ms | min {}ms | max {}ms\n",          .{avg_time, min_time, max_time});
-    try writer.print("Med dist: avg {d:.1} | min {d:.1} | max {d:.1}\n",   .{avg_dist, min_dist, max_dist});
+    var avg_query: i128 = 0;
+    if (profiler.query.items.len > 0) {
+        var total: i128 = 0;
+        for (profiler.query.items) |t| total += t;
+        avg_query = @divTrunc(total, @as(i128, @intCast(profiler.query.items.len)));
+    }
+
+    var avg_collision: i128 = 0;
+    if (profiler.collision.items.len > 0) {
+        var total: i128 = 0;
+        for (profiler.collision.items) |t| total += t;
+        avg_collision = @divTrunc(total, @as(i128, @intCast(profiler.collision.items.len)));
+    }
+
+    var avg_insert: i128 = 0;
+    if (profiler.insert.items.len > 0) {
+        var total: i128 = 0;
+        for (profiler.insert.items) |t| total += t;
+        avg_insert = @divTrunc(total, @as(i128, @intCast(profiler.insert.items.len)));
+    }
+
+    var avg_cell_max: usize = 0;
+    if (profiler.cell_max.items.len > 0) {
+        var total: usize = 0;
+        for (profiler.cell_max.items) |v| total += v;
+        avg_cell_max = total / profiler.cell_max.items.len;
+    }
+
+    const pairs_total = profiler.collision.items.len;
+    const hit_rate: f64 = if (pairs_total > 0)
+        @as(f64, @floatFromInt(profiler.hits)) / @as(f64, @floatFromInt(pairs_total)) * 100.0
+    else 0.0;
+    const avg_pairs_per_frame: usize = if (frames.len > 0) pairs_total / frames.len else 0;
+
+    try writer.print("Frames  : {}\n",                                          .{frames.len});
+    try writer.print("Threads : {}\n",                                          .{THREAD_COUNT});
+    try writer.print("Time    : avg {}ms | min {}ms | max {}ms\n",              .{avg_time, min_time, max_time});
+    try writer.print("Med dist: avg {d:.1} | min {d:.1} | max {d:.1}\n",       .{avg_dist, min_dist, max_dist});
+    try writer.print("Insert  : avg {}ns\n",                                    .{avg_insert});
+    try writer.print("Query   : avg {}ns\n",                                    .{avg_query});
+    try writer.print("Collide : avg {}ns\n",                                    .{avg_collision});
+    try writer.print("Pairs   : avg {}/frame | hits {d:.2}%\n",                 .{avg_pairs_per_frame, hit_rate});
+    try writer.print("Cell max: avg {} ents\n",                                 .{avg_cell_max});
 }
 

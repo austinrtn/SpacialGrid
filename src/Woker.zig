@@ -69,7 +69,7 @@ pub fn Worker(comptime setup: Setup) type {
                     if (chunk.len == 0) continue;
                     self.grid.findCollisions(
                         chunk, self.positions, self.shape_data,
-                        &self.col_list, self.query_buf
+                        &self.col_list, self.query_buf, &.{},
                     );
                 }
 

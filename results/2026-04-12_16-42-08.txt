@@ -1,0 +1,216 @@
+=== 10k ents ===
+Starting sim...
+
+
+--- Results ---
+Time: 2100549
+Build: ReleaseFast
+Config  : 10000 ents | world 1000x1000 | shape: All | timeout: 3s
+Frames  : 110
+Threads : 1
+Time    : avg 26ms | min 26ms | max 32ms
+Med dist: avg 514.8 | min 477.0 | max 560.4
+Insert  : avg 0ms
+Query   : avg 0ms
+Collide : avg 0ms
+Pairs   : avg 552901/frame | hits 4.83%
+Cell max: avg 25 ents
+
+=== 50k ents ===
+Starting sim...
+
+
+--- Results ---
+Time: 2103992
+Build: ReleaseFast
+Config  : 50000 ents | world 1000x1000 | shape: All | timeout: 3s
+Frames  : 5
+Threads : 1
+Time    : avg 681ms | min 672ms | max 685ms
+Med dist: avg 499.2 | min 484.2 | max 522.2
+Insert  : avg 0ms
+Query   : avg 0ms
+Collide : avg 0ms
+Pairs   : avg 13836570/frame | hits 4.83%
+Cell max: avg 90 ents
+
+=== 100k ents ===
+Starting sim...
+
+
+--- Results ---
+Time: 2109386
+Build: ReleaseFast
+Config  : 100000 ents | world 1000x1000 | shape: All | timeout: 3s
+Frames  : 2
+Threads : 1
+Time    : avg 2676ms | min 2671ms | max 2682ms
+Med dist: avg 517.9 | min 493.3 | max 542.6
+Insert  : avg 0ms
+Query   : avg 0ms
+Collide : avg 0ms
+Pairs   : avg 55280272/frame | hits 4.85%
+Cell max: avg 166 ents
+
+=== 150k ents ===
+Starting sim...
+
+
+--- Results ---
+Time: 2115501
+Build: ReleaseFast
+Config  : 150000 ents | world 1000x1000 | shape: All | timeout: 3s
+Frames  : 1
+Threads : 1
+Time    : avg 6056ms | min 6056ms | max 6056ms
+Med dist: avg 495.8 | min 495.8 | max 495.8
+Insert  : avg 1ms
+Query   : avg 0ms
+Collide : avg 0ms
+Pairs   : avg 124535460/frame | hits 4.84%
+Cell max: avg 252 ents
+
+=== 200k ents ===
+Starting sim...
+
+
+--- Results ---
+Time: 2126440
+Build: ReleaseFast
+Config  : 200000 ents | world 1000x1000 | shape: All | timeout: 3s
+Frames  : 1
+Threads : 1
+Time    : avg 10873ms | min 10873ms | max 10873ms
+Med dist: avg 520.0 | min 520.0 | max 520.0
+Insert  : avg 1ms
+Query   : avg 0ms
+Collide : avg 0ms
+Pairs   : avg 221270400/frame | hits 4.82%
+Cell max: avg 307 ents
+
+=== 150k | small world 500x500 ===
+Starting sim...
+
+
+--- Results ---
+Time: 2149506
+Build: ReleaseFast
+Config  : 150000 ents | world 500x500 | shape: All | timeout: 2s
+Frames  : 1
+Threads : 1
+Time    : avg 22953ms | min 22953ms | max 22953ms
+Med dist: avg 263.3 | min 263.3 | max 263.3
+Insert  : avg 1ms
+Query   : avg 0ms
+Collide : avg 0ms
+Pairs   : avg 473910779/frame | hits 5.01%
+Cell max: avg 867 ents
+
+=== 150k | large world 2000x2000 ===
+Starting sim...
+
+
+--- Results ---
+Time: 2152915
+Build: ReleaseFast
+Config  : 150000 ents | world 2000x2000 | shape: All | timeout: 2s
+Frames  : 2
+Threads : 1
+Time    : avg 1590ms | min 1583ms | max 1597ms
+Med dist: avg 997.0 | min 969.2 | max 1024.9
+Insert  : avg 1ms
+Query   : avg 0ms
+Collide : avg 0ms
+Pairs   : avg 31931740/frame | hits 4.75%
+Cell max: avg 71 ents
+
+=== 150k | small shapes ===
+Starting sim...
+
+
+--- Results ---
+Time: 2155153
+Build: ReleaseFast
+Config  : 150000 ents | world 1000x1000 | shape: All | timeout: 2s
+Frames  : 3
+Threads : 1
+Time    : avg 732ms | min 729ms | max 737ms
+Med dist: avg 524.3 | min 513.2 | max 545.8
+Insert  : avg 1ms
+Query   : avg 0ms
+Collide : avg 0ms
+Pairs   : avg 14325745/frame | hits 4.20%
+Cell max: avg 42 ents
+
+=== 150k | large shapes ===
+Starting sim...
+
+
+--- Results ---
+Time: 2213408
+Build: ReleaseFast
+Config  : 150000 ents | world 1000x1000 | shape: All | timeout: 2s
+Frames  : 1
+Threads : 1
+Time    : avg 58228ms | min 58228ms | max 58228ms
+Med dist: avg 533.4 | min 533.4 | max 533.4
+Insert  : avg 1ms
+Query   : avg 0ms
+Collide : avg 0ms
+Pairs   : avg 1212091321/frame | hits 6.62%
+Cell max: avg 2306 ents
+
+=== 150k | circles only ===
+Starting sim...
+
+
+--- Results ---
+Time: 2219807
+Build: ReleaseFast
+Config  : 150000 ents | world 1000x1000 | shape: Circle | timeout: 2s
+Frames  : 1
+Threads : 1
+Time    : avg 5828ms | min 5828ms | max 5828ms
+Med dist: avg 502.2 | min 502.2 | max 502.2
+Insert  : avg 1ms
+Query   : avg 0ms
+Collide : avg 0ms
+Pairs   : avg 124478949/frame | hits 7.45%
+Cell max: avg 238 ents
+
+=== 150k | rects only ===
+Starting sim...
+
+
+--- Results ---
+Time: 2222962
+Build: ReleaseFast
+Config  : 150000 ents | world 1000x1000 | shape: Rect | timeout: 2s
+Frames  : 2
+Threads : 1
+Time    : avg 1542ms | min 1541ms | max 1544ms
+Med dist: avg 516.2 | min 509.6 | max 522.9
+Insert  : avg 1ms
+Query   : avg 0ms
+Collide : avg 0ms
+Pairs   : avg 31924021/frame | hits 8.94%
+Cell max: avg 77 ents
+
+=== 150k | mixed ===
+Starting sim...
+
+
+--- Results ---
+Time: 2229050
+Build: ReleaseFast
+Config  : 150000 ents | world 1000x1000 | shape: All | timeout: 2s
+Frames  : 1
+Threads : 1
+Time    : avg 6051ms | min 6051ms | max 6051ms
+Med dist: avg 503.1 | min 503.1 | max 503.1
+Insert  : avg 1ms
+Query   : avg 0ms
+Collide : avg 0ms
+Pairs   : avg 124584795/frame | hits 4.84%
+Cell max: avg 239 ents
+

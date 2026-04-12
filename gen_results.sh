@@ -1,16 +1,17 @@
 #!/bin/bash
 
 BIN=./zig-out/bin/SpacialGrid
+OUT="./results/$(date +%Y-%m-%d_%H-%M-%S).txt"
 
 echo "Building..."
 zig build -Doptimize=ReleaseFast
-echo "Done. Running..."
+echo "Done. Running... (output -> $OUT)"
 
 run() {
     local label="$1"; shift
-    echo "=== $label ===" | tee -a ./Results.txt
-    $BIN "$@" >> ./Results.txt
-    echo "" >> ./Results.txt
+    echo "=== $label ===" | tee -a "$OUT"
+    $BIN "$@" >> "$OUT"
+    echo "" >> "$OUT"
 }
 
 # Scale entity count
@@ -19,8 +20,8 @@ run "50k ents"    count=50000  timeout=3
 run "100k ents"   count=100000 timeout=3
 run "150k ents"    count=150000 timeout=3
 run "200k ents"    count=200000  timeout=3
-run "500k ents"   count=500000 timeout=1
-run "1m ents"   count=1000000 timeout=1
+#run "500k ents"   count=500000 timeout=1
+#run "1m ents"   count=1000000 timeout=1
 
 # Vary world size at fixed entity count (changes density)
 run "150k | small world 500x500"    count=150000 world_w=500  world_h=500  timeout=2
@@ -35,4 +36,4 @@ run "150k | circles only"  count=150000 shape=Circle timeout=2
 run "150k | rects only"    count=150000 shape=Rect   timeout=2
 run "150k | mixed"         count=150000 shape=All    timeout=2
 
-echo "Results written to Results.txt"
+echo "Results written to $OUT"
