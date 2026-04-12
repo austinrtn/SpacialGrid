@@ -14,13 +14,13 @@ run() {
 }
 
 # Scale entity count
-run "10k ents"    count=10000  timeout=2
-run "50k ents"    count=50000  timeout=2
-run "100k ents"   count=100000 timeout=2
-run "150k ents"    count=150000 timeout=2
-run "200k ents"    count=200000  timeout=2
-#run "500k ents"   count=500000 timeout=5
-#run "1m ents"   count=1000000 timeout=5
+run "10k ents"    count=10000  timeout=3
+run "50k ents"    count=50000  timeout=3
+run "100k ents"   count=100000 timeout=3
+run "150k ents"    count=150000 timeout=3
+run "200k ents"    count=200000  timeout=3
+run "500k ents"   count=500000 timeout=1
+run "1m ents"   count=1000000 timeout=1
 
 # Vary world size at fixed entity count (changes density)
 run "150k | small world 500x500"    count=150000 world_w=500  world_h=500  timeout=2

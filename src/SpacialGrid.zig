@@ -2,6 +2,7 @@ const std = @import("std");
 const CollisionDetection = @import("CollisionDetection.zig").CollisionDetection;
 const Vector2 = @import("Vector2.zig").Vector2;
 const Worker = @import("Woker.zig").Worker;
+const WorkQueue = @import("WorkQueue.zig").WorkQueue;
 
 pub const ShapeType = enum { Point, Rect, Circle};
 pub fn ShapeData(comptime Vec2: type) type {
@@ -33,6 +34,7 @@ pub const CollisionPair = struct {
     b: usize,
 };
 
+
 pub const SpacialGridSetup = struct{thread_count: usize = 1, Vector2: type = Vector2};
 pub fn SpacialGrid(comptime setup: SpacialGridSetup) type {
     const thread_count = if(setup.thread_count == 0) 1 else setup.thread_count;
@@ -47,17 +49,6 @@ pub fn SpacialGrid(comptime setup: SpacialGridSetup) type {
 return struct {
     pub const Vector2 = Vec2;
     pub const ShapeData = Shape;
-    pub const WorkQuery = struct {
-        chunks: []usize = undefined,
-        cell_idx: usize = 0,
-        mu: std.Io.Mutex = .init,
-        io: std.Io,
-
-        fn getNextCellChunk(self: *WorkQuery) !? []usize {
-            try self.mu.lock(self.io);
-            defer self.mu.unlock(self.io);
-        }
-    };
 
     pub const Entity = struct {
         pos: Vec2,
@@ -96,6 +87,7 @@ return struct {
         buf_capacity: usize,
         auto_cell_resize: bool = true,
         workers: [thread_count]Worker(setup) = undefined,
+        work_queue: WorkQueue = undefined,
     };
 
     impl: Impl,
@@ -124,11 +116,12 @@ return struct {
         self.impl.counts = try self.impl.allocator.alloc(usize, self.impl.rows * self.impl.cols);
         @memset(self.impl.counts, 0);
 
-        for(&self.impl.workers) |*w| { 
-            w.* = try Worker(setup).init(self, self.impl.buf_capacity); 
+        for(&self.impl.workers) |*w| {
+            w.* = try Worker(setup).init(self, self.impl.buf_capacity);
             try w.spawn();
         }
 
+        self.impl.work_queue = .init(config.allocator, config.io);
         try self.results.ensureTotalCapacity(self.impl.allocator, self.impl.ent_count);
 
         return self;
@@ -177,18 +170,24 @@ return struct {
             for(0..3) |dc| {
                 const row_offset: i32 = @as(i32, @intCast(dr)) - 1;
                 const col_offset: i32 = @as(i32, @intCast(dc)) - 1;
-                const cell_index = self.getCellIndex(cell_pos.row, row_offset, cell_pos.col, col_offset) catch continue;
+                const cell_index = self.getCellIndex(
+                    cell_pos.row, row_offset, cell_pos.col, col_offset
+               ) catch continue;
 
-                const cell_start = if(cell_index > 0) self.impl.counts[(cell_index - 1)] else 0;
-                const cell_end = self.impl.counts[cell_index];
 
-                const slice = self.impl.indices[cell_start..cell_end];
+                const slice = self.getEntsFromCell(cell_index); 
                 @memcpy(buf[len..len + slice.len], slice);
                 len += slice.len;
             }
         }
 
         return buf[0..len];
+    }
+
+    pub fn getEntsFromCell(self: *Self, cell_index: usize) []usize {
+                const cell_start = if(cell_index > 0) self.impl.counts[(cell_index - 1)] else 0;
+                const cell_end = self.impl.counts[cell_index];
+                return self.impl.indices[cell_start..cell_end];
     }
 
     fn getCellPos(self: Self, pos: Vec2) !struct{row: usize, col: usize, idx: usize} {
@@ -207,11 +206,14 @@ return struct {
         };
     }
 
-    fn getCellIndex(self: Self, row: usize, row_offset: i32, col: usize, col_offset: i32) !usize {
+    pub fn getCellIndex(self: Self, row: usize, row_offset: i32, col: usize, col_offset: i32) !usize {
         const row_val: i32 = @as(i32, @intCast(row)) + row_offset;
         const col_val: i32 = @as(i32, @intCast(col)) + col_offset;
 
-        if(row_val < 0 or row_val >= @as(i32, @intCast(self.impl.rows)) or col_val < 0 or col_val >= @as(i32, @intCast(self.impl.cols))) return error.OutOfBounds;
+        if(row_val < 0 or row_val >= @as(i32, @intCast(self.impl.rows)) or
+           col_val < 0 or col_val >= @as(i32, @intCast(self.impl.cols))) 
+            return error.OutOfBounds;
+
         return @as(usize, @intCast(row_val)) * self.impl.cols + @as(usize, @intCast(col_val));
     }
 
@@ -243,27 +245,16 @@ return struct {
             col_list.clearRetainingCapacity();
 
             findCollisions(self, indices, positions, shape_data, col_list, query_buf);
+
             try self.results.appendSlice(self.impl.allocator, col_list.items);
             return;
         }
+        self.impl.work_queue.reset();
 
-        // Amount of entities / indices per thread
-        const slice_unit: usize = indices.len / thread_count;
-
-        // A chunk is a group of entities / indices to check for collision, separated across threads.
-        const chunks = blk: {
-            var slices: [thread_count][]usize = undefined;
-            for(0..slices.len) |i| {
-                const start = slice_unit * i;
-                const end = if(i == slices.len - 1) indices.len else slice_unit * (i + 1); slices[i] = indices[start..end];
-            }
-            break :blk slices;
-        };
-
-        for(workers, chunks) |*w, chunk| {
+        for(workers) |*w| {
             w.col_list.clearRetainingCapacity();
 
-            w.set(chunk, positions, shape_data);
+            w.set(positions, shape_data);
             w.work_semaphore.post(self.impl.io);
         }
 

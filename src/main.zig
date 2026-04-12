@@ -53,6 +53,7 @@ const Config = struct {
     max_wh: f32 = 12,
     shape: enum {Rect, Circle, All} = .All,
     update_stdout: bool = false,
+    naive: bool = false,
 };
 
 pub fn main(init: std.process.Init) !void {
@@ -103,12 +104,15 @@ pub fn main(init: std.process.Init) !void {
 
         const start_query = Clock.Timestamp.now(init.io, .awake);
 
-        try grid.setCellSize(ents.items(.shape_data), 1.5);
-        try grid.update(.{
-            .positions = ents.items(.pos), 
-            .shape_data = ents.items(.shape_data), 
-            .indices = ents.items(.id)
-        });            
+        if (config.naive) try naiveCollisions(allocator, ents.items(.pos), ents.items(.shape_data), ents.items(.id))
+        else {
+            try grid.setCellSize(ents.items(.shape_data), 1.5);
+            try grid.update(.{
+                .positions = ents.items(.pos),
+                .shape_data = ents.items(.shape_data),
+                .indices = ents.items(.id)
+            });
+        }
 
         const end_query = start_query.durationTo
             (Clock.Timestamp.now(init.io, .awake));
@@ -192,6 +196,9 @@ fn parseArgs(allocator: std.mem.Allocator, args: std.process.Args) !Config {
             else if(result == 1) config.update_stdout = true
             else unreachable;
         }
+        else if(try convertArg(usize, arg, "naive=")) |result| {
+            config.naive = result != 0;
+        }
         else if(std.mem.startsWith(u8, arg, "shape=")) {
             const val = arg["shape=".len..];
             if(std.mem.eql(u8, val, "Circle"))      config.shape = .Circle
@@ -217,6 +224,22 @@ fn convertArg(comptime T: type, arg: []const u8, startsWith: []const u8) !?T {
 
     return null;
 } 
+
+fn naiveCollisions(allocator: std.mem.Allocator, positions: []Vector2, shape_data: []ShapeData, ids: []usize) !void {
+    var results: std.ArrayList(Lib.CollisionPair) = .empty;
+    defer results.deinit(allocator);
+
+    const CD = Lib.CollisionDetection(Vector2);
+    for (0..ids.len) |i| {
+        for (i + 1..ids.len) |j| {
+            const a = ids[i];
+            const b = ids[j];
+            if (CD.checkColliding(positions[a], shape_data[a], positions[b], shape_data[b])) {
+                try results.append(allocator, .{ .a = a, .b = b });
+            }
+        }
+    }
+}
 
 fn printStats(writer: anytype, io: std.Io, config: Config, frames: []const FrameMeteric) !void {
     try writer.writeAll("\n\n--- Results ---\n");

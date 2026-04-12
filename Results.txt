@@ -3,154 +3,180 @@ Starting sim...
 
 
 --- Results ---
-Time: 10111144
+Time: 5917840
 Build: ReleaseFast
-Config  : 10000 ents | world 1000x1000 | shape: All | timeout: 2s
-Frames  : 950
+Config  : 10000 ents | world 1000x1000 | shape: All | timeout: 3s
+Frames  : 1987
 Threads:  6
 Time    : avg 1ms | min 1ms | max 7ms
-Med dist: avg 511.7 | min 461.0 | max 560.7
+Med dist: avg 512.2 | min 446.8 | max 564.1
 
 === 50k ents ===
 Starting sim...
 
 
 --- Results ---
-Time: 10113148
+Time: 5920850
 Build: ReleaseFast
-Config  : 50000 ents | world 1000x1000 | shape: All | timeout: 2s
-Frames  : 45
+Config  : 50000 ents | world 1000x1000 | shape: All | timeout: 3s
+Frames  : 142
 Threads:  6
-Time    : avg 43ms | min 42ms | max 45ms
-Med dist: avg 513.7 | min 479.8 | max 548.8
+Time    : avg 20ms | min 19ms | max 24ms
+Med dist: avg 513.1 | min 466.8 | max 549.0
 
 === 100k ents ===
 Starting sim...
 
 
 --- Results ---
-Time: 10115271
+Time: 5923913
 Build: ReleaseFast
-Config  : 100000 ents | world 1000x1000 | shape: All | timeout: 2s
-Frames  : 13
+Config  : 100000 ents | world 1000x1000 | shape: All | timeout: 3s
+Frames  : 41
 Threads:  6
-Time    : avg 160ms | min 159ms | max 166ms
-Med dist: avg 518.7 | min 504.5 | max 534.3
+Time    : avg 72ms | min 71ms | max 78ms
+Med dist: avg 512.4 | min 471.6 | max 543.2
 
 === 150k ents ===
 Starting sim...
 
 
 --- Results ---
-Time: 10117473
+Time: 5927033
 Build: ReleaseFast
-Config  : 150000 ents | world 1000x1000 | shape: All | timeout: 2s
-Frames  : 6
+Config  : 150000 ents | world 1000x1000 | shape: All | timeout: 3s
+Frames  : 18
 Threads:  6
-Time    : avg 362ms | min 357ms | max 379ms
-Med dist: avg 509.2 | min 489.2 | max 530.0
+Time    : avg 170ms | min 166ms | max 199ms
+Med dist: avg 512.2 | min 486.7 | max 543.8
 
 === 200k ents ===
 Starting sim...
 
 
 --- Results ---
-Time: 10120083
+Time: 5930246
 Build: ReleaseFast
-Config  : 200000 ents | world 1000x1000 | shape: All | timeout: 2s
-Frames  : 4
+Config  : 200000 ents | world 1000x1000 | shape: All | timeout: 3s
+Frames  : 10
 Threads:  6
-Time    : avg 647ms | min 640ms | max 653ms
-Med dist: avg 512.7 | min 496.8 | max 524.2
+Time    : avg 316ms | min 313ms | max 325ms
+Med dist: avg 508.4 | min 482.0 | max 532.6
+
+=== 500k ents ===
+Starting sim...
+
+
+--- Results ---
+Time: 5932600
+Build: ReleaseFast
+Config  : 500000 ents | world 1000x1000 | shape: All | timeout: 1s
+Frames  : 1
+Threads:  6
+Time    : avg 2336ms | min 2336ms | max 2336ms
+Med dist: avg 511.6 | min 511.6 | max 511.6
+
+=== 1m ents ===
+Starting sim...
+
+
+--- Results ---
+Time: 5942954
+Build: ReleaseFast
+Config  : 1000000 ents | world 1000x1000 | shape: All | timeout: 1s
+Frames  : 1
+Threads:  6
+Time    : avg 10321ms | min 10321ms | max 10321ms
+Med dist: avg 483.4 | min 483.4 | max 483.4
 
 === 150k | small world 500x500 ===
 Starting sim...
 
 
 --- Results ---
-Time: 10122878
+Time: 5945448
 Build: ReleaseFast
 Config  : 150000 ents | world 500x500 | shape: All | timeout: 2s
-Frames  : 2
+Frames  : 3
 Threads:  6
-Time    : avg 1390ms | min 1387ms | max 1393ms
-Med dist: avg 260.8 | min 260.2 | max 261.4
+Time    : avg 812ms | min 808ms | max 817ms
+Med dist: avg 253.5 | min 245.3 | max 260.6
 
 === 150k | large world 2000x2000 ===
 Starting sim...
 
 
 --- Results ---
-Time: 10124966
+Time: 5947507
 Build: ReleaseFast
 Config  : 150000 ents | world 2000x2000 | shape: All | timeout: 2s
-Frames  : 20
+Frames  : 41
 Threads:  6
-Time    : avg 101ms | min 98ms | max 104ms
-Med dist: avg 1010.4 | min 972.3 | max 1079.3
+Time    : avg 47ms | min 46ms | max 50ms
+Med dist: avg 1019.7 | min 963.5 | max 1103.4
 
 === 150k | small shapes ===
 Starting sim...
 
 
 --- Results ---
-Time: 10127018
+Time: 5949523
 Build: ReleaseFast
 Config  : 150000 ents | world 1000x1000 | shape: All | timeout: 2s
-Frames  : 39
+Frames  : 72
 Threads:  6
-Time    : avg 49ms | min 48ms | max 57ms
-Med dist: avg 509.1 | min 462.4 | max 541.8
+Time    : avg 25ms | min 25ms | max 31ms
+Med dist: avg 513.8 | min 484.9 | max 555.0
 
 === 150k | large shapes ===
 Starting sim...
 
 
 --- Results ---
-Time: 10130780
+Time: 5951887
 Build: ReleaseFast
 Config  : 150000 ents | world 1000x1000 | shape: All | timeout: 2s
 Frames  : 1
 Threads:  6
-Time    : avg 3755ms | min 3755ms | max 3755ms
-Med dist: avg 508.6 | min 508.6 | max 508.6
+Time    : avg 2357ms | min 2357ms | max 2357ms
+Med dist: avg 468.0 | min 468.0 | max 468.0
 
 === 150k | circles only ===
 Starting sim...
 
 
 --- Results ---
-Time: 10132830
+Time: 5953966
 Build: ReleaseFast
 Config  : 150000 ents | world 1000x1000 | shape: Circle | timeout: 2s
-Frames  : 10
+Frames  : 17
 Threads:  6
-Time    : avg 200ms | min 195ms | max 212ms
-Med dist: avg 514.0 | min 497.0 | max 539.4
+Time    : avg 118ms | min 113ms | max 128ms
+Med dist: avg 501.1 | min 468.9 | max 540.4
 
 === 150k | rects only ===
 Starting sim...
 
 
 --- Results ---
-Time: 10134877
+Time: 5956018
 Build: ReleaseFast
 Config  : 150000 ents | world 1000x1000 | shape: Rect | timeout: 2s
-Frames  : 26
+Frames  : 38
 Threads:  6
-Time    : avg 75ms | min 74ms | max 82ms
-Med dist: avg 516.8 | min 490.2 | max 549.2
+Time    : avg 50ms | min 44ms | max 82ms
+Med dist: avg 509.6 | min 476.4 | max 546.1
 
 === 150k | mixed ===
 Starting sim...
 
 
 --- Results ---
-Time: 10137111
+Time: 5958051
 Build: ReleaseFast
 Config  : 150000 ents | world 1000x1000 | shape: All | timeout: 2s
-Frames  : 6
+Frames  : 11
 Threads:  6
-Time    : avg 368ms | min 365ms | max 378ms
-Med dist: avg 505.8 | min 483.5 | max 540.7
+Time    : avg 181ms | min 170ms | max 208ms
+Med dist: avg 522.1 | min 499.3 | max 538.1
 
