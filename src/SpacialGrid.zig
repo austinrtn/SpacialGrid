@@ -47,6 +47,18 @@ pub fn SpacialGrid(comptime setup: SpacialGridSetup) type {
 return struct {
     pub const Vector2 = Vec2;
     pub const ShapeData = Shape;
+    pub const WorkQuery = struct {
+        chunks: []usize = undefined,
+        cell_idx: usize = 0,
+        mu: std.Io.Mutex = .init,
+        io: std.Io,
+
+        fn getNextCellChunk(self: *WorkQuery) !? []usize {
+            try self.mu.lock(self.io);
+            defer self.mu.unlock(self.io);
+        }
+    };
+
     pub const Entity = struct {
         pos: Vec2,
         shape_data: Shape,
@@ -165,7 +177,7 @@ return struct {
             for(0..3) |dc| {
                 const row_offset: i32 = @as(i32, @intCast(dr)) - 1;
                 const col_offset: i32 = @as(i32, @intCast(dc)) - 1;
-                const cell_index = self.getNeighborCellIndex(cell_pos.row, row_offset, cell_pos.col, col_offset) catch continue;
+                const cell_index = self.getCellIndex(cell_pos.row, row_offset, cell_pos.col, col_offset) catch continue;
 
                 const cell_start = if(cell_index > 0) self.impl.counts[(cell_index - 1)] else 0;
                 const cell_end = self.impl.counts[cell_index];
@@ -195,7 +207,7 @@ return struct {
         };
     }
 
-    fn getNeighborCellIndex(self: Self, row: usize, row_offset: i32, col: usize, col_offset: i32) !usize {
+    fn getCellIndex(self: Self, row: usize, row_offset: i32, col: usize, col_offset: i32) !usize {
         const row_val: i32 = @as(i32, @intCast(row)) + row_offset;
         const col_val: i32 = @as(i32, @intCast(col)) + col_offset;
 

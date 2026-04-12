@@ -8,3 +8,9 @@ pub const CollisionDetection = @import("CollisionDetection.zig").CollisionDetect
 pub const SpacialGrid = SG.SpacialGrid;
 pub const ShapeData = SG.ShapeData;
 pub const CollisionPair = SG.CollisionPair;
+
+pub fn getPrng(io: std.Io) std.Random.DefaultPrng {
+    var seed: u64 = undefined; 
+    io.random(std.mem.asBytes(&seed));
+    return .init(seed);
+}

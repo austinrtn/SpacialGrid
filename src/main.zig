@@ -1,76 +1,171 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Io = std.Io;
 const Lib = @import("SpacialGrid");
 
-const SpacialGrid = Lib.SpacialGrid(.{.thread_count = 4});
-const Vector2 = SpacialGrid.Vector2;
+const THREAD_COUNT = 6;
+const SpacialGrid = Lib.SpacialGrid(.{.thread_count = THREAD_COUNT});
+const Vector2   = SpacialGrid.Vector2;
 const ShapeData = SpacialGrid.ShapeData;
-const Entity = SpacialGrid.Entity;
+const Entity    = SpacialGrid.Entity;
+
+const FrameMeteric = struct {
+    frame: usize = 0,
+    frame_time: i64 = 0,
+    median_dist: f32 = 0,
+fn setMedianDistance(self: *FrameMeteric, allocator: std.mem.Allocator, 
+        prng: *std.Random.DefaultPrng, positions: []Vector2, ids: []usize) 
+    !void {
+        const sample_size: usize = 1000;
+        const rand = prng.random();
+
+        var dists: std.ArrayList(f32) = .empty;
+        defer dists.deinit(allocator);
+
+        for(0..sample_size) |_| {
+                const id_a = ids[rand.intRangeAtMost(usize, 0, ids.len - 1)];
+                const id_b = ids[rand.intRangeAtMost(usize, 0, ids.len - 1)];
+                if(id_a >= id_b) continue;
+                const pos_a = positions[id_a]; 
+                const pos_b = positions[id_b]; 
+
+                const dx = pos_a.x - pos_b.x;
+                const dy = pos_a.y - pos_b.y;
+                const dist: f32 = @sqrt(dx * dx + dy * dy);
+                try dists.append(allocator, dist);
+        }
+
+        std.mem.sort(f32, dists.items, {}, std.sort.asc(f32));
+        self.median_dist = dists.items[@as(usize, @divTrunc(dists.items.len, 2))];
+    } 
+};
 
 const Config = struct {
     world_w: f32 = 1000, 
     world_h: f32 = 1000,
-    max_frames: usize = 5000,
+    timeout: i64 = 5,
     ent_count: usize = 100,
+
+    min_r: f32 = 4,
+    max_r: f32 = 12,
+
+    min_wh: f32 = 4,
+    max_wh: f32 = 12,
     shape: enum {Rect, Circle, All} = .All,
+    update_stdout: bool = false,
 };
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
-    const config = try parseArgs(allocator, init.minimal.args);
 
-    var grid: *SpacialGrid = try .init(SpacialGrid.Config{
+    var buf: [2056]u8 = undefined;
+    var stdout = std.Io.File.stdout().writer(init.io, &buf);
+    const writer = &stdout.interface;
+
+    const config = try parseArgs(allocator, init.minimal.args);
+    var grid: *SpacialGrid = try .init(.{
         .allocator = init.gpa,
         .ent_count = config.ent_count,
-        .width = config.world_w,
-        .height = config.world_h,
-        .io = init.io,
+        .width     = config.world_w,
+        .height    = config.world_h,
+        .auto_cell_resize = false,
+        .cell_size = 25,
+        .io        = init.io,
     });
     defer grid.deinit();
 
     var ents: std.MultiArrayList(Entity) = .empty;
     defer ents.deinit(allocator);
-    try ents.ensureTotalCapacity(allocator, config.ent_count);
 
-    for(0..config.ent_count) |i| {
-        const pos = blk: {
-            
-        };
-        try ents.append(allocator, .{
-            .pos
-        });
-    }
+    try ents.ensureTotalCapacity(allocator, config.ent_count);
+    var prng = Lib.getPrng(init.io);
+    
+    const Clock = std.Io.Clock;
+    const start = Clock.Timestamp.now(init.io, .awake);
+
+    var frames: std.ArrayList(FrameMeteric) = .empty;
+    defer frames.deinit(allocator);
+
+    try writer.writeAll("Starting sim...\n");
+    try writer.flush();
 
     var i: usize = 0;
     while(true) : (i += 1){
+        if(config.update_stdout and i > 0) {
+            const last_frame = frames.items[i - 1];
+            try writer.print("Frame: {} | Time: {} \r", 
+                .{ last_frame.frame, last_frame.frame_time }
+            );
+            try writer.flush();
+        }
+
+        try generateEnts(allocator, &ents, &prng, config);
+
+        const start_query = Clock.Timestamp.now(init.io, .awake);
+
+        try grid.setCellSize(ents.items(.shape_data), 1.5);
         try grid.update(.{
             .positions = ents.items(.pos), 
             .shape_data = ents.items(.shape_data), 
             .indices = ents.items(.id)
         });            
 
-        const results = grid.results.items;
-        const found_col = results.len > 0;
+        const end_query = start_query.durationTo
+            (Clock.Timestamp.now(init.io, .awake));
 
-        std.debug.print("Frame: {} of {}\n", .{i, config.max_frames});
-        for(results) |pair| {
-            std.debug.print("{any}\n", .{pair});
-        }
-        if(!found_col) std.debug.print("No col\r", .{});
-        if(i == 500) {
-            try ents.append(allocator, .{
-                .pos = .{.x = 25, .y = 25},
-                .shape_data = .{ .Circle = 12},
-                .id = 0,
-            });
+        var frame = FrameMeteric{
+            .frame = i, 
+            .frame_time = end_query.raw.toMilliseconds(),
+        };
+        try frame.setMedianDistance(
+            allocator, &prng, ents.items(.pos), ents.items(.id)
+        );
+        try frames.append(allocator, frame); 
 
-            try ents.append(allocator, .{
-                .pos = .{.x = 20, .y = 20},
-                .shape_data = .{ .Rect =  .{.x = 10, .y = 15}},
-                .id = 1,
-            });
-        }
-        if(i == config.max_frames) break;
+        const elapsed = start.durationTo(Clock.Timestamp.now(init.io, .awake));
+
+        if(elapsed.raw.toSeconds() >= config.timeout) break;
+    }
+
+    try printStats(writer, init.io, config, frames.items);
+    try writer.flush();
+}
+
+fn generateEnts(allocator: std.mem.Allocator, ents: *std.MultiArrayList(Entity), pnrg: *std.Random.DefaultPrng, config: Config) !void {
+    const rand = pnrg.random();
+    ents.clearRetainingCapacity();
+
+    for(0..config.ent_count) |i| {
+        const pos = blk: {
+            const x = rand.float(f32) * config.world_w;
+            const y = rand.float(f32) * config.world_h;
+            break :blk Vector2{.x = x, .y = y};
+        };
+        const shape_data: ShapeData = blk: {
+            var shape: @TypeOf(config.shape) = config.shape;
+            if(shape == .All) {
+                switch(rand.intRangeAtMost(usize, 0, 1)) {
+                    0 => shape = .Circle,
+                    1 => shape = .Rect,
+                    else => unreachable,
+                }
+            }
+            switch(shape) {
+                .Rect => {
+                    const w = rand.float(f32) * (config.max_wh - config.min_wh) + config.min_wh;
+                    const h = rand.float(f32) * (config.max_wh - config.min_wh) + config.min_wh;
+                    break :blk ShapeData{.Rect = .{.x = w, .y = h}};
+                },
+                .Circle => break :blk ShapeData{ .Circle = (rand.float(f32) * (config.max_r - config.min_r) + config.min_r )},
+                else => unreachable,
+            }
+            unreachable;
+        };
+        try ents.append(allocator, .{
+            .pos = pos, 
+            .shape_data = shape_data,
+            .id = i,
+        });
     }
 }
 
@@ -83,8 +178,27 @@ fn parseArgs(allocator: std.mem.Allocator, args: std.process.Args) !Config {
     while(iter.next()) |arg| {  
         if(try convertArg(f32, arg, "world_w=")) |result| config.world_w = result
         else if(try convertArg(f32, arg, "world_h=")) |result| config.world_h = result
+
+        else if(try convertArg(f32, arg, "min_r=")) |result| config.min_r = result
+        else if(try convertArg(f32, arg, "max_r=")) |result| config.max_r = result
+
+        else if(try convertArg(f32, arg, "min_wh=")) |result| config.min_wh = result
+        else if(try convertArg(f32, arg, "max_wh=")) |result| config.max_wh = result
+
         else if(try convertArg(usize, arg, "count=")) |result| config.ent_count = result
-        else if(try convertArg(usize, arg, "m_frame=")) |result| config.max_frames = result
+        else if(try convertArg(i64, arg, "timeout=")) |result| config.timeout = result
+        else if(try convertArg(usize, arg, "update=")) |result| {
+            if(result == 0)      config.update_stdout = false
+            else if(result == 1) config.update_stdout = true
+            else unreachable;
+        }
+        else if(std.mem.startsWith(u8, arg, "shape=")) {
+            const val = arg["shape=".len..];
+            if(std.mem.eql(u8, val, "Circle"))      config.shape = .Circle
+            else if(std.mem.eql(u8, val, "Rect"))   config.shape = .Rect
+            else if(std.mem.eql(u8, val, "All"))    config.shape = .All
+            else return error.InvalidArg;
+        }
         else return error.InvalidArg;
     }
 
@@ -103,3 +217,46 @@ fn convertArg(comptime T: type, arg: []const u8, startsWith: []const u8) !?T {
 
     return null;
 } 
+
+fn printStats(writer: anytype, io: std.Io, config: Config, frames: []const FrameMeteric) !void {
+    try writer.writeAll("\n\n--- Results ---\n");
+    try writer.print("Time: {}\n", .{std.Io.Clock.Timestamp.now(io, .awake).raw.toMilliseconds()});
+    try writer.print("Build: {s}\n", .{@tagName(builtin.mode)});
+    try writer.print("Config  : {} ents | world {d:.0}x{d:.0} | shape: {s} | timeout: {}s\n", .{
+        config.ent_count,
+        config.world_w, config.world_h,
+        @tagName(config.shape),
+        config.timeout,
+    });
+
+    if (frames.len == 0) {
+        try writer.writeAll("No frames recorded.\n");
+        return;
+    }
+
+    var total_time: i64 = 0;
+    var min_time: i64   = std.math.maxInt(i64);
+    var max_time: i64   = 0;
+    var total_dist: f32 = 0;
+    var min_dist: f32   = std.math.floatMax(f32);
+    var max_dist: f32   = 0;
+
+    for (frames) |fm| {
+        total_time += fm.frame_time;
+        if (fm.frame_time < min_time) min_time = fm.frame_time;
+        if (fm.frame_time > max_time) max_time = fm.frame_time;
+        total_dist += fm.median_dist;
+        if (fm.median_dist < min_dist) min_dist = fm.median_dist;
+        if (fm.median_dist > max_dist) max_dist = fm.median_dist;
+    }
+
+    const n: i64 = @intCast(frames.len);
+    const avg_time = @divTrunc(total_time, n);
+    const avg_dist = total_dist / @as(f32, @floatFromInt(frames.len));
+
+    try writer.print("Frames  : {}\n",                                      .{frames.len});
+    try writer.print("Threads:  {}\n",                                      .{THREAD_COUNT});
+    try writer.print("Time    : avg {}ms | min {}ms | max {}ms\n",          .{avg_time, min_time, max_time});
+    try writer.print("Med dist: avg {d:.1} | min {d:.1} | max {d:.1}\n",   .{avg_dist, min_dist, max_dist});
+}
+
