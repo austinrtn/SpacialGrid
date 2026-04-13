@@ -1,0 +1,16 @@
+Starting sim...
+
+
+--- Results ---
+Time: 7443096
+Build: Debug
+Config  : 100000 ents | world 1000x1000 | shape: Circle | timeout: 5s
+Frames  : 1
+Threads : 1
+Time    : avg 15685ms | min 15685ms | max 15685ms
+Med dist: avg 505.7 | min 505.7 | max 505.7
+Insert  : avg 12464883ns
+Query   : avg 950ns
+Collide : avg 116ns
+Pairs   : avg 55318520/frame | hits 7.48%
+Cell max: avg 168 ents

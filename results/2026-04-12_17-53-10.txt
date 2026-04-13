@@ -1,0 +1,216 @@
+=== 10k ents ===
+Starting sim...
+
+
+--- Results ---
+Time: 6362866
+Build: ReleaseFast
+Config  : 10000 ents | world 1000x1000 | shape: All | timeout: 3s
+Frames  : 111
+Threads : 1
+Time    : avg 26ms | min 26ms | max 31ms
+Med dist: avg 511.5 | min 470.4 | max 551.8
+Insert  : avg 75138ns
+Query   : avg 111ns
+Collide : avg 24ns
+Pairs   : avg 552843/frame | hits 4.84%
+Cell max: avg 25 ents
+
+=== 50k ents ===
+Starting sim...
+
+
+--- Results ---
+Time: 6366389
+Build: ReleaseFast
+Config  : 50000 ents | world 1000x1000 | shape: All | timeout: 3s
+Frames  : 5
+Threads : 1
+Time    : avg 690ms | min 686ms | max 697ms
+Med dist: avg 513.1 | min 476.1 | max 556.1
+Insert  : avg 406220ns
+Query   : avg 186ns
+Collide : avg 28ns
+Pairs   : avg 13827319/frame | hits 4.85%
+Cell max: avg 93 ents
+
+=== 100k ents ===
+Starting sim...
+
+
+--- Results ---
+Time: 6372219
+Build: ReleaseFast
+Config  : 100000 ents | world 1000x1000 | shape: All | timeout: 3s
+Frames  : 2
+Threads : 1
+Time    : avg 2878ms | min 2868ms | max 2888ms
+Med dist: avg 517.6 | min 516.1 | max 519.1
+Insert  : avg 844120ns
+Query   : avg 301ns
+Collide : avg 30ns
+Pairs   : avg 55311153/frame | hits 4.85%
+Cell max: avg 164 ents
+
+=== 150k ents ===
+Starting sim...
+
+
+--- Results ---
+Time: 6378851
+Build: ReleaseFast
+Config  : 150000 ents | world 1000x1000 | shape: All | timeout: 3s
+Frames  : 1
+Threads : 1
+Time    : avg 6523ms | min 6523ms | max 6523ms
+Med dist: avg 537.0 | min 537.0 | max 537.0
+Insert  : avg 1371139ns
+Query   : avg 429ns
+Collide : avg 30ns
+Pairs   : avg 124594252/frame | hits 4.82%
+Cell max: avg 238 ents
+
+=== 200k ents ===
+Starting sim...
+
+
+--- Results ---
+Time: 6390621
+Build: ReleaseFast
+Config  : 200000 ents | world 1000x1000 | shape: All | timeout: 3s
+Frames  : 1
+Threads : 1
+Time    : avg 11644ms | min 11644ms | max 11644ms
+Med dist: avg 512.1 | min 512.1 | max 512.1
+Insert  : avg 1903943ns
+Query   : avg 533ns
+Collide : avg 31ns
+Pairs   : avg 221235773/frame | hits 4.84%
+Cell max: avg 317 ents
+
+=== 150k | small world 500x500 ===
+Starting sim...
+
+
+--- Results ---
+Time: 6415333
+Build: ReleaseFast
+Config  : 150000 ents | world 500x500 | shape: All | timeout: 2s
+Frames  : 1
+Threads : 1
+Time    : avg 24502ms | min 24502ms | max 24502ms
+Med dist: avg 254.6 | min 254.6 | max 254.6
+Insert  : avg 1436945ns
+Query   : avg 1475ns
+Collide : avg 30ns
+Pairs   : avg 473098503/frame | hits 5.01%
+Cell max: avg 847 ents
+
+=== 150k | large world 2000x2000 ===
+Starting sim...
+
+
+--- Results ---
+Time: 6418967
+Build: ReleaseFast
+Config  : 150000 ents | world 2000x2000 | shape: All | timeout: 2s
+Frames  : 2
+Threads : 1
+Time    : avg 1587ms | min 1572ms | max 1603ms
+Med dist: avg 1061.4 | min 1059.8 | max 1063.1
+Insert  : avg 1342841ns
+Query   : avg 151ns
+Collide : avg 27ns
+Pairs   : avg 31908214/frame | hits 4.75%
+Cell max: avg 73 ents
+
+=== 150k | small shapes ===
+Starting sim...
+
+
+--- Results ---
+Time: 6421163
+Build: ReleaseFast
+Config  : 150000 ents | world 1000x1000 | shape: All | timeout: 2s
+Frames  : 3
+Threads : 1
+Time    : avg 709ms | min 706ms | max 711ms
+Med dist: avg 521.6 | min 492.5 | max 541.4
+Insert  : avg 1310346ns
+Query   : avg 125ns
+Collide : avg 26ns
+Pairs   : avg 14319107/frame | hits 4.20%
+Cell max: avg 43 ents
+
+=== 150k | large shapes ===
+Starting sim...
+
+
+--- Results ---
+Time: 6481991
+Build: ReleaseFast
+Config  : 150000 ents | world 1000x1000 | shape: All | timeout: 2s
+Frames  : 1
+Threads : 1
+Time    : avg 60781ms | min 60781ms | max 60781ms
+Med dist: avg 474.1 | min 474.1 | max 474.1
+Insert  : avg 1382646ns
+Query   : avg 3944ns
+Collide : avg 28ns
+Pairs   : avg 1208255125/frame | hits 6.65%
+Cell max: avg 2264 ents
+
+=== 150k | circles only ===
+Starting sim...
+
+
+--- Results ---
+Time: 6511448
+Build: ReleaseFast
+Config  : 150000 ents | world 1000x1000 | shape: Circle | timeout: 2s
+Frames  : 1
+Threads : 1
+Time    : avg 6174ms | min 6174ms | max 6174ms
+Med dist: avg 508.0 | min 508.0 | max 508.0
+Insert  : avg 1441235ns
+Query   : avg 427ns
+Collide : avg 28ns
+Pairs   : avg 124283727/frame | hits 7.46%
+Cell max: avg 235 ents
+
+=== 150k | rects only ===
+Starting sim...
+
+
+--- Results ---
+Time: 6514576
+Build: ReleaseFast
+Config  : 150000 ents | world 1000x1000 | shape: Rect | timeout: 2s
+Frames  : 2
+Threads : 1
+Time    : avg 1501ms | min 1491ms | max 1511ms
+Med dist: avg 516.2 | min 502.2 | max 530.1
+Insert  : avg 1325015ns
+Query   : avg 150ns
+Collide : avg 25ns
+Pairs   : avg 31913904/frame | hits 8.94%
+Cell max: avg 74 ents
+
+=== 150k | mixed ===
+Starting sim...
+
+
+--- Results ---
+Time: 6521156
+Build: ReleaseFast
+Config  : 150000 ents | world 1000x1000 | shape: All | timeout: 2s
+Frames  : 1
+Threads : 1
+Time    : avg 6513ms | min 6513ms | max 6513ms
+Med dist: avg 475.1 | min 475.1 | max 475.1
+Insert  : avg 1390985ns
+Query   : avg 423ns
+Collide : avg 31ns
+Pairs   : avg 124367110/frame | hits 4.84%
+Cell max: avg 234 ents
+

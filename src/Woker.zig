@@ -2,11 +2,10 @@ const std = @import("std");
 const SpacialGrid = @import("SpacialGrid.zig").SpacialGrid;
 const Setup = @import("SpacialGrid.zig").SpacialGridSetup;
 const CollisionPair = @import("SpacialGrid.zig").CollisionPair;
+const CollisionData = @import("SpacialGrid.zig").CollisionData;
 
 pub fn Worker(comptime setup: Setup) type {
     const Grid = SpacialGrid(setup);
-    const Vec2 = setup.Vector2;
-    const Shape = Grid.ShapeData;
 
     return struct {
         const Self = @This();
@@ -19,8 +18,7 @@ pub fn Worker(comptime setup: Setup) type {
         grid: *Grid = undefined,
         thread: std.Thread = undefined,
 
-        positions: []Vec2 = undefined,
-        shape_data: []Shape = undefined,
+        data: CollisionData = undefined,
         col_list: std.ArrayList(CollisionPair) = .empty,
         query_buf: []usize = undefined,
 
@@ -43,32 +41,30 @@ pub fn Worker(comptime setup: Setup) type {
             self.allocator.free(self.query_buf);
         }
 
-        pub fn set(self: *Self, positions: []Vec2, shape_data: []Shape) void {
-            self.positions = positions;
-            self.shape_data = shape_data;
+        pub fn set(self: *Self, data: CollisionData) void {
+            self.data = data;
         }
 
         pub fn spawn(self: *Self) !void {
             self.thread = try .spawn(
-                .{.allocator = self.allocator},
+                .{ .allocator = self.allocator },
                 Self.work,
-                .{self}
+                .{self},
             );
         }
 
         pub fn work(self: *Self) void {
-            while(true){
+            while (true) {
                 self.work_semaphore.wait(self.io) catch break;
-                if(self.shutdown.load(.acquire)) break;
+                if (self.shutdown.load(.acquire)) break;
 
                 const queue = &self.grid.impl.work_queue;
-                while(
-                    queue.getNextCellChunk(self.grid)
-                    catch @panic("Mutex Cancled Error in WorkerQueue.zig\n"))
-                |chunk| {
+                while (queue.getNextCellChunk(self.grid)
+                    catch @panic("Mutex Cancled Error in WorkerQueue.zig\n")) |chunk|
+                {
                     if (chunk.len == 0) continue;
                     self.grid.findCollisions(
-                        chunk, self.positions, self.shape_data,
+                        chunk, self.data,
                         &self.col_list, self.query_buf, &.{},
                     );
                 }
