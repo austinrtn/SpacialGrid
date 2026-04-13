@@ -1,10 +1,11 @@
 const std = @import("std");
 const CollisionDetection = @import("CollisionDetection.zig").CollisionDetection;
 const Vector2 = @import("Vector2.zig").Vector2;
-const Worker = @import("Woker.zig").Worker;
+const Worker = @import("Worker.zig").Worker;
 const WorkQueue = @import("WorkQueue.zig").WorkQueue;
+const Setup = @import("ZigGridLib.zig").Setup;
 
-pub const ShapeType = enum { Point, Rect, Circle};
+pub const ShapeType = enum { Point, Rect, Circle };
 pub fn ShapeData(comptime Vec2: type) type {
     if(!@hasField(Vec2, "x") or !@hasField(Vec2, "y")) {
         @compileError("Vector2 type must contain both fields x and y\n");
@@ -34,9 +35,7 @@ pub const CollisionPair = struct {
     b: usize,
 };
 
-
-pub const SpacialGridSetup = struct{thread_count: usize = 1, Vector2: type = Vector2};
-pub fn SpacialGrid(comptime setup: SpacialGridSetup) type {
+pub fn SpacialGrid(comptime setup: Setup) type {
     const thread_count = if(setup.thread_count == 0) 1 else setup.thread_count;
     const Vec2 = setup.Vector2;
     const Shape = ShapeData(Vec2);
@@ -357,4 +356,10 @@ return struct {
         self.impl.cell_size_set = true;
     }
 };
+}
+
+pub fn getPrng(io: std.Io) std.Random.DefaultPrng {
+    var seed: u64 = undefined; 
+    io.random(std.mem.asBytes(&seed));
+    return .init(seed);
 }

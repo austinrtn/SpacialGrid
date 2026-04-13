@@ -1,44 +1,16 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Io = std.Io;
-const Lib = @import("SpacialGrid");
+const Clock = std.Io.Clock;
 
 const THREAD_COUNT = 1;
-const SpacialGrid = Lib.SpacialGrid(.{.thread_count = THREAD_COUNT});
-const Vector2   = SpacialGrid.Vector2;
+const ZigGridLib = @import("ZigGridLib").ZigGridLib(.{.thread_count = THREAD_COUNT,});
+const CollisionDetection = ZigGridLib.CollisionDetection;
+const SpacialGrid = ZigGridLib.SpacialGrid;
+const CollisionPair = ZigGridLib.CollisionPair;
+const Vector2   = ZigGridLib.Vector2;
 const ShapeData = SpacialGrid.ShapeData;
 const Entity    = SpacialGrid.Entity;
-
-const FrameMeteric = struct {
-    frame: usize = 0,
-    frame_time: i64 = 0,
-    median_dist: f32 = 0,
-fn setMedianDistance(self: *FrameMeteric, allocator: std.mem.Allocator, 
-        prng: *std.Random.DefaultPrng, positions: []Vector2, ids: []usize) 
-    !void {
-        const sample_size: usize = 1000;
-        const rand = prng.random();
-
-        var dists: std.ArrayList(f32) = .empty;
-        defer dists.deinit(allocator);
-
-        for(0..sample_size) |_| {
-                const id_a = ids[rand.intRangeAtMost(usize, 0, ids.len - 1)];
-                const id_b = ids[rand.intRangeAtMost(usize, 0, ids.len - 1)];
-                if(id_a >= id_b) continue;
-                const pos_a = positions[id_a]; 
-                const pos_b = positions[id_b]; 
-
-                const dx = pos_a.x - pos_b.x;
-                const dy = pos_a.y - pos_b.y;
-                const dist: f32 = @sqrt(dx * dx + dy * dy);
-                try dists.append(allocator, dist);
-        }
-
-        std.mem.sort(f32, dists.items, {}, std.sort.asc(f32));
-        self.median_dist = dists.items[@as(usize, @divTrunc(dists.items.len, 2))];
-    } 
-};
 
 const Config = struct {
     world_w: f32 = 1000, 
@@ -66,12 +38,11 @@ pub fn main(init: std.process.Init) !void {
     const config = try parseArgs(allocator, init.minimal.args);
     var grid: *SpacialGrid = try .init(.{
         .allocator = init.gpa,
-        .ent_count = config.ent_count,
-        .width     = config.world_w,
-        .height    = config.world_h,
+        .ent_count = config.ent_count, .width  = config.world_w,
+        .height = config.world_h,
         .auto_cell_resize = false,
         .cell_size = 25,
-        .io        = init.io,
+        .io = init.io,
     });
     defer grid.deinit();
 
@@ -79,10 +50,8 @@ pub fn main(init: std.process.Init) !void {
     defer ents.deinit(allocator);
 
     try ents.ensureTotalCapacity(allocator, config.ent_count);
-    var prng = Lib.getPrng(init.io);
+    var prng = getPrng(init.io);
     
-    const Clock = std.Io.Clock;
-
     var frames: std.ArrayList(FrameMeteric) = .empty;
     defer frames.deinit(allocator);
 
@@ -247,10 +216,10 @@ fn convertArg(comptime T: type, arg: []const u8, startsWith: []const u8) !?T {
 } 
 
 fn naiveCollisions(allocator: std.mem.Allocator, positions: []Vector2, shape_data: []ShapeData, ids: []usize) !void {
-    var results: std.ArrayList(Lib.CollisionPair) = .empty;
+    var results: std.ArrayList(CollisionPair) = .empty;
     defer results.deinit(allocator);
 
-    const CD = Lib.CollisionDetection(Vector2);
+    const CD = CollisionDetection;
     for (0..ids.len) |i| {
         for (i + 1..ids.len) |j| {
             const a = ids[i];
@@ -261,6 +230,42 @@ fn naiveCollisions(allocator: std.mem.Allocator, positions: []Vector2, shape_dat
         }
     }
 }
+const FrameMeteric = struct {
+    frame: usize = 0,
+    frame_time: i64 = 0,
+    median_dist: f32 = 0,
+
+    fn setMedianDistance(
+        self: *FrameMeteric, 
+        allocator: std.mem.Allocator, 
+        prng: *std.Random.DefaultPrng, 
+        positions: []Vector2, 
+        ids: []usize
+    ) 
+    !void {
+        const sample_size: usize = 1000;
+        const rand = prng.random();
+
+        var dists: std.ArrayList(f32) = .empty;
+        defer dists.deinit(allocator);
+
+        for(0..sample_size) |_| {
+                const id_a = ids[rand.intRangeAtMost(usize, 0, ids.len - 1)];
+                const id_b = ids[rand.intRangeAtMost(usize, 0, ids.len - 1)];
+                if(id_a >= id_b) continue;
+                const pos_a = positions[id_a]; 
+                const pos_b = positions[id_b]; 
+
+                const dx = pos_a.x - pos_b.x;
+                const dy = pos_a.y - pos_b.y;
+                const dist: f32 = @sqrt(dx * dx + dy * dy);
+                try dists.append(allocator, dist);
+        }
+
+        std.mem.sort(f32, dists.items, {}, std.sort.asc(f32));
+        self.median_dist = dists.items[@as(usize, @divTrunc(dists.items.len, 2))];
+    } 
+};
 
 fn printStats(writer: anytype, io: std.Io, config: Config, frames: []const FrameMeteric, profiler: anytype) !void {
     try writer.writeAll("\n\n--- Results ---\n");
@@ -343,3 +348,8 @@ fn printStats(writer: anytype, io: std.Io, config: Config, frames: []const Frame
     try writer.print("Cell max: avg {} ents\n",                                 .{avg_cell_max});
 }
 
+pub fn getPrng(io: std.Io) std.Random.DefaultPrng {
+    var seed: u64 = undefined; 
+    io.random(std.mem.asBytes(&seed));
+    return .init(seed);
+}

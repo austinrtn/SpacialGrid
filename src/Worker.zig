@@ -1,6 +1,6 @@
 const std = @import("std");
 const SpacialGrid = @import("SpacialGrid.zig").SpacialGrid;
-const Setup = @import("SpacialGrid.zig").SpacialGridSetup;
+const Setup = @import("ZigGridLib.zig").Setup;
 const CollisionPair = @import("SpacialGrid.zig").CollisionPair;
 
 pub fn Worker(comptime setup: Setup) type {
