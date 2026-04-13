@@ -4,19 +4,10 @@ const Vector2 = @import("Vector2.zig").Vector2;
 const Worker = @import("Worker.zig").Worker;
 const WorkQueue = @import("WorkQueue.zig").WorkQueue;
 const Setup = @import("ZigGridLib.zig").Setup;
+const ShapeTypeMod = @import("ShapeType.zig");
+const ShapeType = ShapeTypeMod.ShapeType;
+const ShapeData = ShapeTypeMod.ShapeData;
 
-pub const ShapeType = enum { Point, Rect, Circle };
-pub fn ShapeData(comptime Vec2: type) type {
-    if(!@hasField(Vec2, "x") or !@hasField(Vec2, "y")) {
-        @compileError("Vector2 type must contain both fields x and y\n");
-    }
-
-    return union(ShapeType){
-        Point: void,
-        Rect: Vec2,
-        Circle: f32,
-    };
-}
 
 pub fn CollisionData(comptime Vec2: type) type { 
     if(!@hasField(Vec2, "x") or !@hasField(Vec2, "y")) {
@@ -46,9 +37,12 @@ pub fn SpacialGrid(comptime setup: Setup) type {
     }
 
 return struct {
+    const Self = @This();
     pub const Vector2 = Vec2;
     pub const ShapeData = Shape;
-
+    
+    /// A struct that represents an entity and 
+    /// contains all necessary data for collision
     pub const Entity = struct {
         pos: Vec2,
         shape_data: Shape,
@@ -59,7 +53,7 @@ return struct {
         }
     };
 
-    const Self = @This();
+    /// Necessary for initing a SpacialGrid instance
     pub const Config = struct {
         width: f32,
         height: f32,
@@ -92,6 +86,7 @@ return struct {
     impl: Impl,
     results: std.ArrayList(CollisionPair) = .empty,
 
+    /// Create a new instance of SpacialGrid
     pub fn init(config: Config) !*Self {
         const self = try config.allocator.create(Self);
         self.* = Self {
@@ -115,6 +110,7 @@ return struct {
         self.impl.counts = try self.impl.allocator.alloc(usize, self.impl.rows * self.impl.cols);
         @memset(self.impl.counts, 0);
 
+        // Init worker threads. 
         for(&self.impl.workers) |*w| {
             w.* = try Worker(setup).init(self, self.impl.buf_capacity);
             try w.spawn();
@@ -139,13 +135,20 @@ return struct {
         allocator.destroy(self);
     }
 
+    /// Constructs SpacialGrid cells using entity data
     fn insert(self: *Self, ids: []usize, positions: []Vec2) void {
-        @memset(self.impl.counts, 0);
+        // Reset counts slice
+        @memset(self.impl.counts, 0); 
+
+        // For each entity position find the cell the ent 
+        // exist in and increase the cell's count.
         for(positions) |pos| {
             const cell = self.getCellPos(pos) catch continue;
             self.impl.counts[cell.idx] += 1;
         }
 
+        // Prefix-sum pass: rewrite counts[i] from "entity count in cell i"
+        // to "start offset of cell i in the indices array".
         var total: usize = 0;
         for(self.impl.counts) |*count| {
             const placeholder = count.*;
@@ -153,6 +156,8 @@ return struct {
             total += placeholder;
         }
 
+        // Scatter pass: write each entity id into its cell's slot in indices,
+        // advancing the cell's write cursor so consecutive ids pack contiguously.
         for(positions, ids) |pos, id| {
             const cell = self.getCellPos(pos) catch continue;
             const count_index: *usize = &self.impl.counts[cell.idx];
@@ -363,3 +368,4 @@ pub fn getPrng(io: std.Io) std.Random.DefaultPrng {
     io.random(std.mem.asBytes(&seed));
     return .init(seed);
 }
+

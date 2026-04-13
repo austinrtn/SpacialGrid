@@ -1,5 +1,5 @@
 const std = @import("std");
-const ShapeData = @import("SpacialGrid.zig").ShapeData;
+const ShapeData = @import("ShapeType.zig").ShapeData;
 
 pub fn CollisionDetection(comptime Vector2: type) type {
 
