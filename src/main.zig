@@ -3,7 +3,6 @@ const builtin = @import("builtin");
 const Io = std.Io;
 const Clock = std.Io.Clock;
 
-const THREAD_COUNT = 1;
 const ZigGridLib = @import("ZigGridLib").ZigGridLib(.{});
 const CollisionDetection = ZigGridLib.CollisionDetection;
 const SpacialGrid = ZigGridLib.SpacialGrid;
@@ -25,6 +24,8 @@ const Config = struct {
     max_wh: f32 = 12,
     shape: enum {Rect, Circle, All} = .All,
     update_stdout: bool = false,
+    multi_threaded: bool = false,
+    thread_count: ?usize = null, 
     naive: bool = false,
 };
 
@@ -42,6 +43,8 @@ pub fn main(init: std.process.Init) !void {
         .height = config.world_h,
         .auto_cell_resize = false,
         .cell_size = 25,
+        .multi_threaded = config.multi_threaded,
+        .thread_count = config.thread_count,
         .io = init.io,
     });
     defer grid.deinit();
@@ -170,32 +173,56 @@ fn parseArgs(allocator: std.mem.Allocator, args: std.process.Args) !Config {
     _ = iter.next();
 
     while(iter.next()) |arg| {  
+        // World and Shape dimensions 
         if(try convertArg(f32, arg, "world_w=")) |result| config.world_w = result
         else if(try convertArg(f32, arg, "world_h=")) |result| config.world_h = result
 
+        // Circle
         else if(try convertArg(f32, arg, "min_r=")) |result| config.min_r = result
         else if(try convertArg(f32, arg, "max_r=")) |result| config.max_r = result
 
+        // Rect
         else if(try convertArg(f32, arg, "min_wh=")) |result| config.min_wh = result
         else if(try convertArg(f32, arg, "max_wh=")) |result| config.max_wh = result
 
-        else if(try convertArg(usize, arg, "count=")) |result| config.ent_count = result
+        // Entity Count 
+        else if(try convertArg(usize, arg, "count=")) |result| config.ent_count = result 
+        // Time before simulation ends in seconds
         else if(try convertArg(i64, arg, "timeout=")) |result| config.timeout = result
+
+        // Set multi_threaded 
+        else if(try convertArg(usize, arg, "m_threaded=")) |result| {
+            if(result == 0) config.multi_threaded = false
+            else if(result == 1) config.multi_threaded = true  
+            else unreachable;
+        }
+        // Number of threads to be used
+        else if(try convertArg(usize, arg, "threads=")) |result| {
+            config.thread_count = result;
+            config.multi_threaded = true;
+        }
+
+        // If output should print to STDOUT
         else if(try convertArg(usize, arg, "update=")) |result| {
-            if(result == 0)      config.update_stdout = false
+            if(result == 0) config.update_stdout = false
             else if(result == 1) config.update_stdout = true
             else unreachable;
         }
+
+        // Run ent-per-ent collision detection (no spacial grid)
         else if(try convertArg(usize, arg, "naive=")) |result| {
             config.naive = result != 0;
         }
+
+        // Choose which shapes to generate 
         else if(std.mem.startsWith(u8, arg, "shape=")) {
             const val = arg["shape=".len..];
-            if(std.mem.eql(u8, val, "Circle"))      config.shape = .Circle
-            else if(std.mem.eql(u8, val, "Rect"))   config.shape = .Rect
-            else if(std.mem.eql(u8, val, "All"))    config.shape = .All
+            if(std.mem.eql(u8, val, "Circle"))config.shape = .Circle
+            else if(std.mem.eql(u8, val, "Rect"))config.shape = .Rect
+            else if(std.mem.eql(u8, val, "All")) config.shape = .All
             else return error.InvalidArg;
         }
+
         else return error.InvalidArg;
     }
 
@@ -337,8 +364,13 @@ fn printStats(writer: anytype, io: std.Io, config: Config, frames: []const Frame
     else 0.0;
     const avg_pairs_per_frame: usize = if (frames.len > 0) pairs_total / frames.len else 0;
 
+    const thread_count = blk: {
+        if(!config.multi_threaded) break :blk 1;
+        break :blk config.thread_count orelse try std.Thread.getCpuCount();
+    };
+
     try writer.print("Frames  : {}\n",                                          .{frames.len});
-    try writer.print("Threads : {}\n",                                          .{THREAD_COUNT});
+    try writer.print("Threads : {}\n",                                          .{thread_count});
     try writer.print("Time    : avg {}ms | min {}ms | max {}ms\n",              .{avg_time, min_time, max_time});
     try writer.print("Med dist: avg {d:.1} | min {d:.1} | max {d:.1}\n",       .{avg_dist, min_dist, max_dist});
     try writer.print("Insert  : avg {}ns\n",                                    .{avg_insert});

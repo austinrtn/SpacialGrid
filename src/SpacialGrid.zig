@@ -8,7 +8,6 @@ const ShapeTypeMod = @import("ShapeType.zig");
 const ShapeType = ShapeTypeMod.ShapeType;
 const ShapeData = ShapeTypeMod.ShapeData;
 
-
 pub fn CollisionData(comptime Vec2: type) type { 
     if(!@hasField(Vec2, "x") or !@hasField(Vec2, "y")) {
         @compileError("Vector2 type must contain both fields x and y");
@@ -61,6 +60,7 @@ return struct {
         io: std.Io,
         ent_count: usize = 0,
         multi_threaded: bool = false,
+        thread_count: ?usize = null,
         auto_cell_resize: bool = true,
     };
 
@@ -77,6 +77,7 @@ return struct {
 
         counts: []usize,
         multi_threaded: bool = false,
+        thread_count: ?usize = null,
         indices: []usize,
         buf_capacity: usize,
         auto_cell_resize: bool = true,
@@ -107,6 +108,7 @@ return struct {
                 .indices = undefined,
                 .workers = undefined,
                 .multi_threaded = config.multi_threaded,
+                .thread_count = config.thread_count,
                 .auto_cell_resize = config.auto_cell_resize,
             },
         };
@@ -117,12 +119,17 @@ return struct {
 
         self.impl.query_buf = try config.allocator.alloc(usize, self.impl.buf_capacity);
 
-        if(config.multi_threaded) {  
-            const thread_count = try std.Thread.getCpuCount();
+        if(self.impl.thread_count != null and !self.impl.multi_threaded) {
+            std.log.warn("SpacialGrid.multi_threading must be set to true to enable multi_threading!\n", .{});
+        }
+
+        // Get number of cpu cores and create that many number of Workers/ threads 
+        if(config.multi_threaded) {
+            const thread_count = self.impl.thread_count orelse try std.Thread.getCpuCount();
             self.impl.workers = try config.allocator.alloc(Worker(setup), thread_count);
 
             // Init worker threads. 
-            for(&self.impl.workers) |*w| {
+            for(self.impl.workers) |*w| {
                 w.* = try Worker(setup).init(self, self.impl.buf_capacity);
                 try w.spawn();
             }
@@ -138,11 +145,14 @@ return struct {
         const allocator = self.impl.allocator;
         allocator.free(self.impl.counts);
         allocator.free(self.impl.indices);
+        allocator.free(self.impl.query_buf);
+        self.impl.col_list.deinit(allocator);
 
         // Deinit workers and free memory
-        for(&self.impl.workers) |*w| w.deinit();
-        allocator.free(self.impl.workers);
-
+        if(self.impl.multi_threaded) {  
+            for(self.impl.workers) |*w| w.deinit();
+            allocator.free(self.impl.workers);
+        }
         self.results.deinit(self.impl.allocator);
         allocator.destroy(self);
     }
@@ -234,7 +244,7 @@ return struct {
     }
 
     pub fn update(self: *Self, collision_data: CollisionD, profiler: anytype) !void {
-        const workers = &self.impl.workers;
+        const workers = self.impl.workers;
         
         if(!self.impl.auto_cell_resize and !self.impl.cell_size_set) {
             std.log.err(
@@ -271,8 +281,8 @@ return struct {
         }
 
         if(!self.impl.multi_threaded) {
-            const col_list = &workers[0].col_list;
-            const query_buf = workers[0].query_buf;
+            const col_list = &self.impl.col_list;
+            const query_buf = self.impl.query_buf;
 
             col_list.clearRetainingCapacity();
             
@@ -338,12 +348,12 @@ return struct {
     /// Allocate new buffers to accommodate new entity count
     fn resizeBuffers(self: *Self, new_len: usize) !void {
         self.impl.allocator.free(self.impl.indices);
-        for(&self.impl.workers) |*w| w.allocator.free(w.query_buf);
+        for(self.impl.workers) |*w| w.allocator.free(w.query_buf);
 
         const new_cap = @max(new_len, self.impl.buf_capacity * 2);
         self.impl.buf_capacity = new_cap;
         self.impl.indices = try self.impl.allocator.alloc(usize, new_cap);
-        for(&self.impl.workers) |*w| w.query_buf = try w.allocator.alloc(usize, new_cap);
+        for(self.impl.workers) |*w| w.query_buf = try w.allocator.alloc(usize, new_cap);
     }
     
     /// Set the size of the SpacialGrid's cells to largest entity multiplied by N 
