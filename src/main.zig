@@ -4,7 +4,7 @@ const Io = std.Io;
 const Clock = std.Io.Clock;
 
 const THREAD_COUNT = 1;
-const ZigGridLib = @import("ZigGridLib").ZigGridLib(.{.thread_count = THREAD_COUNT,});
+const ZigGridLib = @import("ZigGridLib").ZigGridLib(.{});
 const CollisionDetection = ZigGridLib.CollisionDetection;
 const SpacialGrid = ZigGridLib.SpacialGrid;
 const CollisionPair = ZigGridLib.CollisionPair;

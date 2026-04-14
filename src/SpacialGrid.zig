@@ -27,7 +27,6 @@ pub const CollisionPair = struct {
 };
 
 pub fn SpacialGrid(comptime setup: Setup) type {
-    const thread_count = if(setup.thread_count == 0) 1 else setup.thread_count;
     const Vec2 = setup.Vector2;
     const Shape = ShapeData(Vec2);
     const CollisionD = CollisionData(Vec2);
@@ -61,6 +60,7 @@ return struct {
         allocator: std.mem.Allocator,
         io: std.Io,
         ent_count: usize = 0,
+        multi_threaded: bool = false,
         auto_cell_resize: bool = true,
     };
 
@@ -76,11 +76,15 @@ return struct {
         ent_count: usize,
 
         counts: []usize,
+        multi_threaded: bool = false,
         indices: []usize,
         buf_capacity: usize,
         auto_cell_resize: bool = true,
-        workers: [thread_count]Worker(setup) = undefined,
+        workers: []Worker(setup) = undefined,
         work_queue: WorkQueue = undefined,
+
+        col_list: std.ArrayList(CollisionPair) = .empty,
+        query_buf: []usize = undefined
     };
 
     impl: Impl,
@@ -102,6 +106,7 @@ return struct {
                 .counts = undefined,
                 .indices = undefined,
                 .workers = undefined,
+                .multi_threaded = config.multi_threaded,
                 .auto_cell_resize = config.auto_cell_resize,
             },
         };
@@ -110,13 +115,20 @@ return struct {
         self.impl.counts = try self.impl.allocator.alloc(usize, self.impl.rows * self.impl.cols);
         @memset(self.impl.counts, 0);
 
-        // Init worker threads. 
-        for(&self.impl.workers) |*w| {
-            w.* = try Worker(setup).init(self, self.impl.buf_capacity);
-            try w.spawn();
-        }
+        self.impl.query_buf = try config.allocator.alloc(usize, self.impl.buf_capacity);
 
-        self.impl.work_queue = .init(config.allocator, config.io);
+        if(config.multi_threaded) {  
+            const thread_count = try std.Thread.getCpuCount();
+            self.impl.workers = try config.allocator.alloc(Worker(setup), thread_count);
+
+            // Init worker threads. 
+            for(&self.impl.workers) |*w| {
+                w.* = try Worker(setup).init(self, self.impl.buf_capacity);
+                try w.spawn();
+            }
+
+            self.impl.work_queue = .init(config.allocator, config.io);
+        }
         try self.results.ensureTotalCapacity(self.impl.allocator, self.impl.ent_count);
 
         return self;
@@ -127,9 +139,9 @@ return struct {
         allocator.free(self.impl.counts);
         allocator.free(self.impl.indices);
 
-        for(&self.impl.workers) |*w| {
-            w.deinit();
-        }
+        // Deinit workers and free memory
+        for(&self.impl.workers) |*w| w.deinit();
+        allocator.free(self.impl.workers);
 
         self.results.deinit(self.impl.allocator);
         allocator.destroy(self);
@@ -258,7 +270,7 @@ return struct {
             profiler.cell_max.append(self.impl.allocator, max) catch @panic("Profiler\n");
         }
 
-        if(thread_count == 1 or indices.len < thread_count) {
+        if(!self.impl.multi_threaded) {
             const col_list = &workers[0].col_list;
             const query_buf = workers[0].query_buf;
 
@@ -269,8 +281,8 @@ return struct {
             try self.results.appendSlice(self.impl.allocator, col_list.items);
             return;
         }
-        self.impl.work_queue.reset();
 
+        self.impl.work_queue.reset();
         for(workers) |*w| {
             w.col_list.clearRetainingCapacity();
 

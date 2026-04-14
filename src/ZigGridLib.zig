@@ -6,7 +6,7 @@ const Vector2 = @import("Vector2.zig").Vector2;
 
 const SpacialGridT = SpacialGridMod.SpacialGrid;
 
-pub const Setup = struct{ thread_count: usize = 1, Vector2: type = Vector2 };
+pub const Setup = struct{Vector2: type = Vector2 };
 pub fn ZigGridLib(comptime setup: Setup) type {
     return struct {
         pub const ZigGridLibSetup = Setup;
