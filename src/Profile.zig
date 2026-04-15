@@ -135,12 +135,17 @@ return struct {
             shape_data: []Shape,
             col_list: *std.ArrayList(CollisionPair),
             query_buf: []usize,
+            profiler: anytype,
         ) void {
             for(indices) |id_a| {
                 const pos_a = positions[id_a];
                 const shape_a = shape_data[id_a];
 
+                const query_start = std.Io.Clock.Timestamp.now(self.io, .awake);
                 const nearby = grid.query(pos_a, query_buf) catch continue;
+                const query_end = query_start.durationTo(std.Io.Clock.Timestamp.now(self.io, .awake));
+                if(@hasField(@TypeOf(profiler.*), "query"))
+                    profiler.query.append(self.allocator, query_end.raw.toNanoseconds()) catch @panic("Profiler\n");
 
                 for(nearby) |id_b| {
                     if(id_a >= id_b) continue;
@@ -148,7 +153,14 @@ return struct {
                     const pos_b = positions[id_b];
                     const shape_b = shape_data[id_b];
 
-                    if(CollisionDetection(Vec2).checkColliding(pos_a, shape_a, pos_b, shape_b)) {
+                    const col_time_start = std.Io.Clock.Timestamp.now(self.io, .awake);
+                    const colliding = CollisionDetection(Vec2).checkColliding(pos_a, shape_a, pos_b, shape_b);
+                    const col_end = col_time_start.durationTo(std.Io.Clock.Timestamp.now(self.io, .awake));
+                    if(@hasField(@TypeOf(profiler.*), "collision"))
+                        profiler.collision.append(self.allocator, col_end.raw.toNanoseconds()) catch @panic("Profiler\n");
+
+                    if(colliding) {
+                        if(@hasField(@TypeOf(profiler.*), "hits")) profiler.hits += 1;
                         col_list.append(self.allocator, .{ .a = id_a, .b = id_b }) catch continue;
                     }
                 }
@@ -279,7 +291,7 @@ return struct {
     }
 
     /// Main collision detection loop
-    pub fn update(self: *Self, collision_data: CollisionD) !void {
+    pub fn update(self: *Self, collision_data: CollisionD, profiler: anytype) !void {
         const workers = self.impl.workers;
         
         // Make sure the user sets the cell size before running update 
@@ -300,17 +312,29 @@ return struct {
             if(self.impl.auto_cell_resize) try self.setCellSize(shape_data, 2);
         }
 
-        // Insert entities into the grid 
         self.results.clearRetainingCapacity();
-        self.insert(indices, positions);
 
-        // If not multi_threaded, just call findCollisions, else run workers
+        const insert_start = std.Io.Clock.Timestamp.now(self.impl.io, .awake);
+        self.insert(indices, positions);
+        const insert_end = insert_start.durationTo(std.Io.Clock.Timestamp.now(self.impl.io, .awake));
+        if(@hasField(@TypeOf(profiler.*), "insert"))
+            profiler.insert.append(self.impl.allocator, insert_end.raw.toNanoseconds()) catch @panic("Profiler\n");
+
+        if(@hasField(@TypeOf(profiler.*), "cell_max")) {
+            var max: usize = 0;
+            for(0..self.impl.counts.len) |ci| {
+                const start = if(ci > 0) self.impl.counts[ci - 1] else 0;
+                const count = self.impl.counts[ci] - start;
+                if(count > max) max = count;
+            }
+            profiler.cell_max.append(self.impl.allocator, max) catch @panic("Profiler\n");
+        }
+
         if(!self.impl.multi_threaded) {
-            self.impl.findCollisions(self, indices, positions, shape_data, &self.results, self.impl.query_buf);
+            self.impl.findCollisions(self, indices, positions, shape_data, &self.results, self.impl.query_buf, profiler);
             return;
         }
 
-        // Have workers look for and save collisions 
         self.impl.work_queue.reset();
         for(workers) |*w| {
             w.col_list.clearRetainingCapacity();
@@ -319,7 +343,6 @@ return struct {
             w.work_semaphore.post(self.impl.io);
         }
 
-        // Once workers are finished, add their collisions to the grid's results
         for(workers) |*w| {
             w.done_semaphore.wait(self.impl.io) catch continue; 
             try self.results.appendSlice(self.impl.allocator, w.col_list.items);

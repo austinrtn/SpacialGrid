@@ -20,8 +20,8 @@ pub const WorkQueue = struct {
 
         if(self.col_idx == grid.impl.cols) return null;
 
-        const cell_idx = grid.getCellIndex(self.row_idx, 0, self.col_idx, 0) catch unreachable;
-        const ents = grid.getEntsFromCell(cell_idx);
+        const cell_idx = grid.impl.getCellIndex(self.row_idx, 0, self.col_idx, 0) catch unreachable;
+        const ents = grid.impl.getEntsFromCell(cell_idx);
 
         if(self.row_idx == grid.impl.rows - 1) {
             self.col_idx += 1;

@@ -15,7 +15,7 @@ const Config = struct {
     world_w: f32 = 1000, 
     world_h: f32 = 1000,
     timeout: i64 = 5,
-    ent_count: usize = 100,
+    ent_count: usize = 1500,
 
     min_r: f32 = 4,
     max_r: f32 = 12,
@@ -39,7 +39,7 @@ pub fn main(init: std.process.Init) !void {
     const config = try parseArgs(allocator, init.minimal.args);
     var grid: *SpacialGrid = try .init(.{
         .allocator = init.gpa,
-        .ent_count = config.ent_count, .width  = config.world_w,
+        .ent_capacity = config.ent_count, .width  = config.world_w,
         .height = config.world_h,
         .auto_cell_resize = false,
         .cell_size = 25,
@@ -102,9 +102,7 @@ pub fn main(init: std.process.Init) !void {
                 .positions = ents.items(.pos),
                 .shape_data = ents.items(.shape_data),
                 .indices = ents.items(.id)
-            },
-            &profiler,
-            );
+            });
         }
 
         const end_query = start_query.durationTo

@@ -67,9 +67,9 @@ pub fn Worker(comptime setup: Setup) type {
                     catch @panic("Mutex Cancled Error in WorkerQueue.zig\n"))
                 |chunk| {
                     if (chunk.len == 0) continue;
-                    self.grid.findCollisions(
-                        chunk, self.positions, self.shape_data,
-                        &self.col_list, self.query_buf, &.{},
+                    self.grid.impl.findCollisions(
+                        self.grid, chunk, self.positions, self.shape_data,
+                        &self.col_list, self.query_buf,
                     );
                 }
 
