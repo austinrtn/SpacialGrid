@@ -41,8 +41,7 @@ pub fn main(init: std.process.Init) !void {
         .allocator = init.gpa,
         .ent_capacity = config.ent_count, .width  = config.world_w,
         .height = config.world_h,
-        .auto_cell_resize = false,
-        .cell_size = 25,
+        .cell_size_multiplier = 1.2,
         .multi_threaded = config.multi_threaded,
         .thread_count = config.thread_count,
         .io = init.io,
@@ -97,7 +96,7 @@ pub fn main(init: std.process.Init) !void {
 
         if (config.naive) try naiveCollisions(allocator, ents.items(.pos), ents.items(.shape_data), ents.items(.id))
         else {
-            try grid.setCellSize(ents.items(.shape_data), 1.5);
+            try grid.setCellSize(ents.items(.shape_data));
             try grid.update(.{
                 .positions = ents.items(.pos),
                 .shape_data = ents.items(.shape_data),

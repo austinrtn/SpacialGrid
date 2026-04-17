@@ -61,8 +61,8 @@ return struct {
 
         width: f32, // Width of world 
         height: f32, // Height of world
-        cell_size: f32, // Size of each cell.  Recommend it be 1.2-2x the size 
-        auto_cell_resize: bool = true, // Set if cells get resized automatically when new entites are added to the SpacialGrid
+        cell_size: f32 = 1, // Size of each cell.  Recommend it be 1.2-2x the size of largest entity
+        cell_size_multiplier: f32 = 2.0, // Multiplier applied to the largest entity size when computing cell size via setCellSize.  Recommend 1.2-2.0
 
         ent_capacity: usize = 0, // The max amount of entities the SpacialGrid contains until next allocation
 
@@ -78,21 +78,24 @@ return struct {
         height: f32,
         rows: usize,
         cols: usize,
-        cell_size: f32 = 1.0, 
-        cell_size_set: bool = false,
+        cell_size: f32 = 1.0,
 
         indices: []usize,
         counts: []usize, // Tracks entity count per cell
-                         
+        ent_count: usize = 0,
+        ids: []usize = undefined,
+        positions: []Vec2 = undefined,
+        shape_data: []Shape = undefined,
+
         multi_threaded: bool = false,
         thread_count: ?usize = null,
 
         ent_capacity: usize,
-        auto_cell_resize: bool = true,
 
         workers: []Worker(setup) = undefined, // Used for deviding work durring mulithreading 
         work_queue: WorkQueue = undefined, // Where workers pull their "work"
         query_buf: []usize = undefined, // Used for querying entities in a single threaded context
+        has_updated: bool = false,
 
         pub fn getCellIndex(self: @This(), row: usize, row_offset: i32, col: usize, col_offset: i32) !usize {
             const row_val: i32 = @as(i32, @intCast(row)) + row_offset;
@@ -157,12 +160,14 @@ return struct {
     };
 
     impl: Impl,
+    cell_size_multiplier: f32, // Multiplier applied to the largest entity size when computing cell size via setCellSize.  Recommend 1.2-2.0
     results: std.ArrayList(CollisionPair) = .empty, // Where collisions are kept after update is called
 
     /// Create a new instance of SpacialGrid
     pub fn init(config: Config) !*Self {
         const self = try config.allocator.create(Self);
         self.* = Self {
+            .cell_size_multiplier = config.cell_size_multiplier,
             .impl = .{
                 .allocator = config.allocator,
                 .io = config.io,
@@ -176,7 +181,6 @@ return struct {
                 .workers = undefined,
                 .multi_threaded = config.multi_threaded,
                 .thread_count = config.thread_count,
-                .auto_cell_resize = config.auto_cell_resize,
             },
         };
 
@@ -184,6 +188,10 @@ return struct {
         self.impl.indices = try self.impl.allocator.alloc(usize, self.impl.ent_capacity);
         self.impl.counts = try self.impl.allocator.alloc(usize, self.impl.rows * self.impl.cols);
         @memset(self.impl.counts, 0);
+
+        self.impl.ids = try self.impl.allocator.alloc(usize, self.impl.ent_capacity);
+        self.impl.positions = try self.impl.allocator.alloc(Vec2, self.impl.ent_capacity);
+        self.impl.shape_data = try self.impl.allocator.alloc(Shape, self.impl.ent_capacity);
 
         self.impl.query_buf = try config.allocator.alloc(usize, self.impl.ent_capacity);
 
@@ -214,6 +222,9 @@ return struct {
         const allocator = self.impl.allocator;
         allocator.free(self.impl.counts);
         allocator.free(self.impl.indices);
+        allocator.free(self.impl.ids);
+        allocator.free(self.impl.positions);
+        allocator.free(self.impl.shape_data);
         allocator.free(self.impl.query_buf);
 
         // Deinit workers and free memory
@@ -226,13 +237,36 @@ return struct {
     }
 
     /// Constructs SpacialGrid cells using entity data
-    fn insert(self: *Self, ids: []usize, positions: []Vec2) void {
-        // Reset counts slice
-        @memset(self.impl.counts, 0); 
+    fn insert(self: *Self, ids: []usize, positions: []Vec2, shape_data: []Shape) !void {
+        if(self.impl.has_updated) {
+            self.reset();
+        }
 
+        // Resize if the new ent count passed in is greater than capacity
+        const projected_ent_count = self.impl.ent_count + ids.len;
+        if(projected_ent_count > self.impl.ent_capacity) try self.resizeBuffers(projected_ent_count * 2);
+        
+        const ent_count = self.impl.ent_count;
+        for(ids, 0..) |id, i| {
+            self.impl.ids[ent_count + i] = id;
+        }
+
+        for(positions, 0..) |pos, i| {
+            self.impl.positions[ent_count + i] = pos;
+        } 
+
+        for(shape_data, 0..) |shape, i| {
+            self.impl.shape_data[ent_count + i] = shape;
+        } 
+
+        self.impl.ent_count = projected_ent_count;
+    }
+
+    pub fn build(self: *Self) void {
         // For each entity position find the cell the ent 
         // exist in and increase the cell's count.
-        for(positions) |pos| {
+        for(0..self.impl.ent_count) |i| {
+            const pos = self.impl.positions[i];
             const cell = self.impl.getCellPos(pos) catch continue;
             self.impl.counts[cell.idx] += 1;
         }
@@ -240,7 +274,8 @@ return struct {
         // Prefix-sum pass: rewrite counts[i] from "entity count in cell i"
         // to "start offset of cell i in the indices array".
         var total: usize = 0;
-        for(self.impl.counts) |*count| {
+        for(0..(self.impl.rows * self.impl.cols)) |i| {
+            const count = &self.impl.counts[i];
             const placeholder = count.*;
             count.* = total;
             total += placeholder;
@@ -248,12 +283,19 @@ return struct {
 
         // Scatter pass: write each entity id into its cell's slot in indices,
         // advancing the cell's write cursor so consecutive ids pack contiguously.
-        for(positions, ids) |pos, id| {
+        for(0..self.impl.ent_count) |i| {
+            const pos = self.impl.positions[i];
             const cell = self.impl.getCellPos(pos) catch continue;
             const count_index: *usize = &self.impl.counts[cell.idx];
-            self.impl.indices[count_index.*] = id;
+            self.impl.indices[count_index.*] = i;
             count_index.* += 1;
         }
+    }
+
+    pub fn reset(self: *Self) void {
+        @memset(self.impl.counts, 0); 
+        self.impl.has_updated = false;
+        self.impl.ent_count = 0;
     }
 
     /// Get entities from cell of and neighboring cells of position
@@ -282,23 +324,9 @@ return struct {
     pub fn update(self: *Self, collision_data: CollisionD) !void {
         const workers = self.impl.workers;
         
-        // Make sure the user sets the cell size before running update 
-        if(!self.impl.auto_cell_resize and !self.impl.cell_size_set) {
-            std.log.err(
-            "Must call SpacialGrid.setCellSize before calling SpacialGrid.update"
-            , .{});
-            return error.CellSizeNotSet;
-        }
-
         const indices = collision_data.indices;
         const positions = collision_data.positions;
         const shape_data = collision_data.shape_data;
-
-        // Resize if the ent count passed in is greater than capacity
-        if(indices.len > self.impl.ent_capacity or (self.impl.auto_cell_resize and !self.impl.cell_size_set)) {
-            try self.resizeBuffers(indices.len);
-            if(self.impl.auto_cell_resize) try self.setCellSize(shape_data, 2);
-        }
 
         // Insert entities into the grid 
         self.results.clearRetainingCapacity();
@@ -329,24 +357,37 @@ return struct {
     /// Allocate new buffers to accommodate new entity count
     fn resizeBuffers(self: *Self, new_len: usize) !void {
         self.impl.allocator.free(self.impl.indices);
-        for(self.impl.workers) |*w| w.allocator.free(w.query_buf);
+        self.impl.allocator.free(self.impl.ids);
+        self.impl.allocator.free(self.impl.positions);
+        self.impl.allocator.free(self.impl.shape_data);
+        self.impl.allocator.free(self.impl.query_buf);
+        if(self.impl.multi_threaded) {
+            for(self.impl.workers) |*w| w.allocator.free(w.query_buf);
+        }
 
         const new_cap = @max(new_len, self.impl.ent_capacity * 2);
         self.impl.ent_capacity = new_cap;
         self.impl.indices = try self.impl.allocator.alloc(usize, new_cap);
-        for(self.impl.workers) |*w| w.query_buf = try w.allocator.alloc(usize, new_cap);
+        self.impl.ids = try self.impl.allocator.alloc(usize, new_cap);
+        self.impl.positions = try self.impl.allocator.alloc(Vec2, new_cap);
+        self.impl.shape_data = try self.impl.allocator.alloc(Shape, new_cap);
+        self.impl.query_buf = try self.impl.allocator.alloc(usize, new_cap);
+        if(self.impl.multi_threaded) {
+            for(self.impl.workers) |*w| w.query_buf = try w.allocator.alloc(usize, new_cap);
+        }
     }
     
-    /// Set the size of the SpacialGrid's cells to largest entity multiplied by N 
-    pub fn setCellSize(self: *Self, shape_data: []Shape, n: f32) !void {
-        if(n < 1) @panic("n is less than 1\n");
-
+    /// Set the size of the SpacialGrid's cell size to the size of the largest entity 
+    /// multipied by SpacialGrid.cell_size_multiplier.
+    /// Must be called before SpacialGrid.update and must be called whenever the maximum size 
+    /// for an entity changes.   
+    pub fn setCellSize(self: *Self, shape_data: []Shape) !void {
         const cell_size: f32 = blk: {
             var largest: f32 = 0.0;
             for(shape_data) |shape| {
                 const size = switch(shape) {
-                    .Circle => |r| r * 2 * n,
-                    .Rect => |dim| @max(dim.x, dim.y) * n,
+                    .Circle => |r| r * 2 * self.cell_size_multiplier,
+                    .Rect => |dim| @max(dim.x, dim.y) * self.cell_size_multiplier,
                     .Point => 0,
                 };
 
@@ -361,7 +402,6 @@ return struct {
         self.impl.cols = @intFromFloat(@ceil(self.impl.width / self.impl.cell_size));
         self.impl.allocator.free(self.impl.counts);
         self.impl.counts = try self.impl.allocator.alloc(usize, self.impl.rows * self.impl.cols);
-        self.impl.cell_size_set = true;
     }
 };
 }
