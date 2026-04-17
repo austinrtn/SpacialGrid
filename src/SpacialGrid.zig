@@ -15,23 +15,23 @@ pub fn CollisionData(comptime Vec2: type) type {
     }
 
     return struct {
-        indices: []usize,
+        indices: []u32,
         positions: []Vec2,
         shape_data: []ShapeData(Vec2),
     };
 }
 
-/// The struct that is returned when two entities collide 
+/// The struct that is returned when two entities collide
 pub const CollisionPair = struct {
-    a: usize,
-    b: usize,
+    a: u32,
+    b: u32,
 };
 
 /// Collision detection system 
 pub fn SpacialGrid(comptime setup: Setup) type {
     const Vec2 = setup.Vector2;
     const Shape = ShapeData(Vec2);
-    const CollisionD = CollisionData(Vec2);
+    //const CollisionD = CollisionData(Vec2);
 
     if(!@hasField(Vec2, "x") or !@hasField(Vec2, "y")) {
         @compileError("Vector2 type must contain both fields x and y");
@@ -47,9 +47,9 @@ return struct {
     pub const Entity = struct {
         pos: Vec2,
         shape_data: Shape,
-        id: usize,
+        id: u32,
 
-        pub fn init(pos: Vec2, shape_data: Shape, id: usize) Entity {
+        pub fn init(pos: Vec2, shape_data: Shape, id: u32) Entity {
             return .{.pos = pos, .shape_data = shape_data, .id = id};
         }
     };
@@ -63,8 +63,6 @@ return struct {
         height: f32, // Height of world
         cell_size: f32 = 1, // Size of each cell.  Recommend it be 1.2-2x the size of largest entity
         cell_size_multiplier: f32 = 2.0, // Multiplier applied to the largest entity size when computing cell size via setCellSize.  Recommend 1.2-2.0
-
-        ent_capacity: usize = 0, // The max amount of entities the SpacialGrid contains until next allocation
 
         // If null, thread count is set automatically to cpu core count.  multi_threaded variable still must be set to true
         thread_count: ?usize = null, 
@@ -80,37 +78,53 @@ return struct {
         cols: usize,
         cell_size: f32 = 1.0,
 
-        indices: []usize,
-        counts: []usize, // Tracks entity count per cell
-        ent_count: usize = 0,
-        ids: []usize = undefined,
+        indices: []u32,
+        counts: []u32, // Tracks entity count per cell
+        ent_count: u32 = 0,
+        ids: []u32 = undefined,
         positions: []Vec2 = undefined,
         shape_data: []Shape = undefined,
 
         multi_threaded: bool = false,
         thread_count: ?usize = null,
 
-        ent_capacity: usize,
+        ent_capacity: u32 = 0,
 
-        workers: []Worker(setup) = undefined, // Used for deviding work durring mulithreading 
+        workers: []Worker(setup) = undefined, // Used for deviding work durring mulithreading
         work_queue: WorkQueue = undefined, // Where workers pull their "work"
-        query_buf: []usize = undefined, // Used for querying entities in a single threaded context
+        query_buf: []u32 = undefined, // Used for querying entities in a single threaded context
         has_updated: bool = false,
 
-        pub fn getCellIndex(self: @This(), row: usize, row_offset: i32, col: usize, col_offset: i32) !usize {
-            const row_val: i32 = @as(i32, @intCast(row)) + row_offset;
-            const col_val: i32 = @as(i32, @intCast(col)) + col_offset;
-
-            if(row_val < 0 or row_val >= @as(i32, @intCast(self.rows)) or
-               col_val < 0 or col_val >= @as(i32, @intCast(self.cols)))
-                return error.OutOfBounds;
-
-            return @as(usize, @intCast(row_val)) * self.cols + @as(usize, @intCast(col_val));
+        pub fn getCellIndex(self: @This(), row: i32, col: i32) !usize {
+            if (row < 0 or col < 0) return error.OutOfBounds;
+            const r: usize = @intCast(row);
+            const c: usize = @intCast(col);
+            if (r >= self.rows or c >= self.cols) return error.OutOfBounds;
+            return r * self.cols + c;
         }
 
-        pub fn getEntsFromCell(self: *@This(), cell_index: usize) []usize {
-            const cell_start = if(cell_index > 0) self.counts[cell_index - 1] else 0;
-            const cell_end = self.counts[cell_index];
+        /// Fills `buf` with the linear indices of the (up to 9) cells in the
+        /// 3x3 neighborhood around (row, col), skipping any that fall outside
+        /// the grid. `buf` must have length >= 9.
+        pub fn getNeighborCells(self: @This(), row: usize, col: usize, buf: []usize) []usize {
+            const r: i32 = @intCast(row);
+            const c: i32 = @intCast(col);
+            var len: usize = 0;
+            for (0..3) |dr| {
+                for (0..3) |dc| {
+                    const rr = r + @as(i32, @intCast(dr)) - 1;
+                    const cc = c + @as(i32, @intCast(dc)) - 1;
+                    const idx = self.getCellIndex(rr, cc) catch continue;
+                    buf[len] = idx;
+                    len += 1;
+                }
+            }
+            return buf[0..len];
+        }
+
+        pub fn getEntsFromCell(self: *@This(), cell_index: usize) []u32 {
+            const cell_start: usize = if(cell_index > 0) @intCast(self.counts[cell_index - 1]) else 0;
+            const cell_end: usize = @intCast(self.counts[cell_index]);
             return self.indices[cell_start..cell_end];
         }
 
@@ -133,23 +147,23 @@ return struct {
         pub fn findCollisions(
             self: *@This(),
             grid: anytype,
-            indices: []usize,
+            indices: []u32,
             positions: []Vec2,
             shape_data: []Shape,
             col_list: *std.ArrayList(CollisionPair),
-            query_buf: []usize,
+            query_buf: []u32,
         ) void {
             for(indices) |id_a| {
-                const pos_a = positions[id_a];
-                const shape_a = shape_data[id_a];
+                const pos_a = positions[@intCast(id_a)];
+                const shape_a = shape_data[@intCast(id_a)];
 
                 const nearby = grid.query(pos_a, query_buf) catch continue;
 
                 for(nearby) |id_b| {
                     if(id_a >= id_b) continue;
 
-                    const pos_b = positions[id_b];
-                    const shape_b = shape_data[id_b];
+                    const pos_b = positions[@intCast(id_b)];
+                    const shape_b = shape_data[@intCast(id_b)];
 
                     if(CollisionDetection(Vec2).checkColliding(pos_a, shape_a, pos_b, shape_b)) {
                         col_list.append(self.allocator, .{ .a = id_a, .b = id_b }) catch continue;
@@ -175,7 +189,6 @@ return struct {
                 .height = config.height,
                 .rows = @intFromFloat(@ceil(config.height / config.cell_size)),
                 .cols = @intFromFloat(@ceil(config.width / config.cell_size)),
-                .ent_capacity = config.ent_capacity,
                 .counts = undefined,
                 .indices = undefined,
                 .workers = undefined,
@@ -184,16 +197,17 @@ return struct {
             },
         };
 
-        // Allocate space for cells 
-        self.impl.indices = try self.impl.allocator.alloc(usize, self.impl.ent_capacity);
-        self.impl.counts = try self.impl.allocator.alloc(usize, self.impl.rows * self.impl.cols);
+        // Allocate space for cells
+        const ent_capacity: usize = @intCast(self.impl.ent_capacity);
+        self.impl.indices = try self.impl.allocator.alloc(u32, ent_capacity);
+        self.impl.counts = try self.impl.allocator.alloc(u32, self.impl.rows * self.impl.cols);
         @memset(self.impl.counts, 0);
 
-        self.impl.ids = try self.impl.allocator.alloc(usize, self.impl.ent_capacity);
-        self.impl.positions = try self.impl.allocator.alloc(Vec2, self.impl.ent_capacity);
-        self.impl.shape_data = try self.impl.allocator.alloc(Shape, self.impl.ent_capacity);
+        self.impl.ids = try self.impl.allocator.alloc(u32, ent_capacity);
+        self.impl.positions = try self.impl.allocator.alloc(Vec2, ent_capacity);
+        self.impl.shape_data = try self.impl.allocator.alloc(Shape, ent_capacity);
 
-        self.impl.query_buf = try config.allocator.alloc(usize, self.impl.ent_capacity);
+        self.impl.query_buf = try config.allocator.alloc(u32, ent_capacity);
 
         // Setting the thread count does not enable multi threading by itself
         if(self.impl.thread_count != null and !self.impl.multi_threaded) {
@@ -205,15 +219,15 @@ return struct {
             const thread_count = self.impl.thread_count orelse try std.Thread.getCpuCount();
             self.impl.workers = try config.allocator.alloc(Worker(setup), thread_count);
 
-            // Init worker threads. 
+            // Init worker threads.
             for(self.impl.workers) |*w| {
-                w.* = try Worker(setup).init(self, self.impl.ent_capacity);
+                w.* = try Worker(setup).init(self, @intCast(self.impl.ent_capacity));
                 try w.spawn();
             }
 
             self.impl.work_queue = .init(config.allocator, config.io);
         }
-        try self.results.ensureTotalCapacity(self.impl.allocator, self.impl.ent_capacity);
+        try self.results.ensureTotalCapacity(self.impl.allocator, @intCast(self.impl.ent_capacity));
 
         return self;
     }
@@ -236,36 +250,48 @@ return struct {
         allocator.destroy(self);
     }
 
-    /// Constructs SpacialGrid cells using entity data
-    fn insert(self: *Self, ids: []usize, positions: []Vec2, shape_data: []Shape) !void {
+    /// Add entities into the spacial grid
+    pub fn insert(self: *Self, ids: []const u32, positions: []const Vec2, shape: ShapeType, ) !void {
         if(self.impl.has_updated) {
             self.reset();
         }
 
         // Resize if the new ent count passed in is greater than capacity
-        const projected_ent_count = self.impl.ent_count + ids.len;
-        if(projected_ent_count > self.impl.ent_capacity) try self.resizeBuffers(projected_ent_count * 2);
-        
-        const ent_count = self.impl.ent_count;
+        const projected_ent_count: usize = @as(usize, self.impl.ent_count) + ids.len;
+        if(projected_ent_count > @as(usize, self.impl.ent_capacity)) try self.ensureCapacity(projected_ent_count * 2);
+
+        const ent_count: usize = @intCast(self.impl.ent_count);
         for(ids, 0..) |id, i| {
             self.impl.ids[ent_count + i] = id;
         }
 
         for(positions, 0..) |pos, i| {
             self.impl.positions[ent_count + i] = pos;
-        } 
+        }
 
         for(shape_data, 0..) |shape, i| {
             self.impl.shape_data[ent_count + i] = shape;
-        } 
+        }
 
-        self.impl.ent_count = projected_ent_count;
+        self.impl.ent_count = @intCast(projected_ent_count);
+    }
+
+    /// Insert entities into the spacial grid by passing a MultiArrayList
+    pub fn insertMAL(self: *Self, mal: anytype) !void {
+        try self.insert(mal.items(.id), mal.items(.pos), mal.items(.shape_data));
+    }
+
+    /// Insert entities into the spacial grid by passing a Struct of Arrays
+    pub fn insertSoA(self: *Self, soa: anytype) !void {
+        try self.insert(soa.ids, soa.positions, soa.shape_data);
     }
 
     pub fn build(self: *Self) void {
-        // For each entity position find the cell the ent 
+        const ent_count: usize = @intCast(self.impl.ent_count);
+
+        // For each entity position find the cell the ent
         // exist in and increase the cell's count.
-        for(0..self.impl.ent_count) |i| {
+        for(0..ent_count) |i| {
             const pos = self.impl.positions[i];
             const cell = self.impl.getCellPos(pos) catch continue;
             self.impl.counts[cell.idx] += 1;
@@ -273,7 +299,7 @@ return struct {
 
         // Prefix-sum pass: rewrite counts[i] from "entity count in cell i"
         // to "start offset of cell i in the indices array".
-        var total: usize = 0;
+        var total: u32 = 0;
         for(0..(self.impl.rows * self.impl.cols)) |i| {
             const count = &self.impl.counts[i];
             const placeholder = count.*;
@@ -283,11 +309,11 @@ return struct {
 
         // Scatter pass: write each entity id into its cell's slot in indices,
         // advancing the cell's write cursor so consecutive ids pack contiguously.
-        for(0..self.impl.ent_count) |i| {
+        for(0..ent_count) |i| {
             const pos = self.impl.positions[i];
             const cell = self.impl.getCellPos(pos) catch continue;
-            const count_index: *usize = &self.impl.counts[cell.idx];
-            self.impl.indices[count_index.*] = i;
+            const count_index: *u32 = &self.impl.counts[cell.idx];
+            self.impl.indices[@intCast(count_index.*)] = @intCast(i);
             count_index.* += 1;
         }
     }
@@ -299,42 +325,39 @@ return struct {
     }
 
     /// Get entities from cell of and neighboring cells of position
-    pub fn query(self: *Self, pos: Vec2, buf: []usize) ![]usize {
+    pub fn query(self: *Self, pos: Vec2, buf: []u32) ![]u32 {
         const cell_pos = try self.impl.getCellPos(pos);
 
-        var len: usize = 0;
-        for(0..3) |dr| {
-            for(0..3) |dc| {
-                const row_offset: i32 = @as(i32, @intCast(dr)) - 1;
-                const col_offset: i32 = @as(i32, @intCast(dc)) - 1;
-                const cell_index = self.impl.getCellIndex(
-                    cell_pos.row, row_offset, cell_pos.col, col_offset
-                ) catch continue;
+        var neighbor_buf: [9]usize = undefined;
+        const neighbors = self.impl.getNeighborCells(cell_pos.row, cell_pos.col, &neighbor_buf);
 
-                const slice = self.impl.getEntsFromCell(cell_index);
-                @memcpy(buf[len..len + slice.len], slice);
-                len += slice.len;
-            }
+        var len: usize = 0;
+        for (neighbors) |cell_index| {
+            const slice = self.impl.getEntsFromCell(cell_index);
+            @memcpy(buf[len..len + slice.len], slice);
+            len += slice.len;
         }
 
         return buf[0..len];
     }
 
     /// Main collision detection loop
-    pub fn update(self: *Self, collision_data: CollisionD) !void {
+    pub fn update(self: *Self) !void {
         const workers = self.impl.workers;
         
-        const indices = collision_data.indices;
-        const positions = collision_data.positions;
-        const shape_data = collision_data.shape_data;
+        const ent_count: usize = @intCast(self.impl.ent_count);
+        const ids = self.impl.ids[0..ent_count];
+        const positions = self.impl.positions;
+        const shape_data = self.impl.shape_data;
 
         // Insert entities into the grid 
         self.results.clearRetainingCapacity();
-        self.insert(indices, positions);
+        self.build();
 
         // If not multi_threaded, just call findCollisions, else run workers
         if(!self.impl.multi_threaded) {
-            self.impl.findCollisions(self, indices, positions, shape_data, &self.results, self.impl.query_buf);
+            self.impl.findCollisions(self, ids, positions, shape_data, &self.results, self.impl.query_buf);
+            self.impl.has_updated = true;
             return;
         }
 
@@ -352,10 +375,12 @@ return struct {
             w.done_semaphore.wait(self.impl.io) catch continue; 
             try self.results.appendSlice(self.impl.allocator, w.col_list.items);
         }
+
+        self.impl.has_updated = true;
     }
 
     /// Allocate new buffers to accommodate new entity count
-    fn resizeBuffers(self: *Self, new_len: usize) !void {
+    pub fn ensureCapacity(self: *Self, capacity: usize) !void {
         self.impl.allocator.free(self.impl.indices);
         self.impl.allocator.free(self.impl.ids);
         self.impl.allocator.free(self.impl.positions);
@@ -365,15 +390,15 @@ return struct {
             for(self.impl.workers) |*w| w.allocator.free(w.query_buf);
         }
 
-        const new_cap = @max(new_len, self.impl.ent_capacity * 2);
-        self.impl.ent_capacity = new_cap;
-        self.impl.indices = try self.impl.allocator.alloc(usize, new_cap);
-        self.impl.ids = try self.impl.allocator.alloc(usize, new_cap);
+        const new_cap: usize = @max(capacity, @as(usize, self.impl.ent_capacity) * 2);
+        self.impl.ent_capacity = @intCast(new_cap);
+        self.impl.indices = try self.impl.allocator.alloc(u32, new_cap);
+        self.impl.ids = try self.impl.allocator.alloc(u32, new_cap);
         self.impl.positions = try self.impl.allocator.alloc(Vec2, new_cap);
         self.impl.shape_data = try self.impl.allocator.alloc(Shape, new_cap);
-        self.impl.query_buf = try self.impl.allocator.alloc(usize, new_cap);
+        self.impl.query_buf = try self.impl.allocator.alloc(u32, new_cap);
         if(self.impl.multi_threaded) {
-            for(self.impl.workers) |*w| w.query_buf = try w.allocator.alloc(usize, new_cap);
+            for(self.impl.workers) |*w| w.query_buf = try w.allocator.alloc(u32, new_cap);
         }
     }
     
@@ -381,10 +406,10 @@ return struct {
     /// multipied by SpacialGrid.cell_size_multiplier.
     /// Must be called before SpacialGrid.update and must be called whenever the maximum size 
     /// for an entity changes.   
-    pub fn setCellSize(self: *Self, shape_data: []Shape) !void {
+    pub fn setCellSize(self: *Self) !void {
         const cell_size: f32 = blk: {
             var largest: f32 = 0.0;
-            for(shape_data) |shape| {
+            for(self.impl.shape_data) |shape| {
                 const size = switch(shape) {
                     .Circle => |r| r * 2 * self.cell_size_multiplier,
                     .Rect => |dim| @max(dim.x, dim.y) * self.cell_size_multiplier,
@@ -401,7 +426,8 @@ return struct {
         self.impl.rows = @intFromFloat(@ceil(self.impl.height / self.impl.cell_size));
         self.impl.cols = @intFromFloat(@ceil(self.impl.width / self.impl.cell_size));
         self.impl.allocator.free(self.impl.counts);
-        self.impl.counts = try self.impl.allocator.alloc(usize, self.impl.rows * self.impl.cols);
+        self.impl.counts = try self.impl.allocator.alloc(u32, self.impl.rows * self.impl.cols);
+        @memset(self.impl.counts, 0);
     }
 };
 }
@@ -412,3 +438,85 @@ pub fn getPrng(io: std.Io) std.Random.DefaultPrng {
     return .init(seed);
 }
 
+const EntStorage = struct {
+    const Self = @This();
+    allocator: std.mem.Allocator,
+    shape: ShapeType,
+    ent_count: usize = 0,
+    capacity: usize = 0,
+
+    indices: []u32 = undefined,  
+    counts: []u32 = undefined,  
+
+    ids: []u32 = undefined,
+    xs: []f32 = undefined,
+    ys: []f32 = undefined,
+
+    widths: ?[]f32 = null,
+    heights: ?[]f32 = null,
+    radii: ?[]f32 = null,
+
+    fn init(allocator: std.mem.Allocator, grid: anytype, capacity: usize, shape: ShapeType) !Self {
+        var self: Self = .{.allocator = allocator, .shape = shape};
+
+        if(shape == .Rect) { self.widths = undefined; self.heights = undefined; }
+        else if(shape == .Circle) self.radii = undefined;
+
+        self.counts = try allocator.alloc(u32, grid.impl.rows * grid.impl.cols);
+        try self.ensureCapacity(capacity, true);
+
+        return self; 
+    }
+
+    fn insert(self: *Self, ids: []u32, xs: []f32, ys: []f32, widths: ?[]f32, heights: ?[]f32, radii: ?[]f32) void {
+        @memcpy(self.ids[self.ent_count..][0..ids.len], ids);
+        @memcpy(self.xs[self.ent_count..][0..xs.len], xs);
+        @memcpy(self.ys[self.ent_count..][0..ys.len], ys);
+
+        switch(self.shape) {
+            .Rect => {
+                @memcpy(self.widths[self.ent_count..][0..widths.len], widths);
+                @memcpy(self.heights[self.ent_count..][0..heights.len], heights);
+            },
+            .Circle => @memcpy(self.radii[self.ent_count..][0..radii.len], radii),
+            else => {},
+        }
+    }
+
+    fn ensureCapacity(self: *Self, new_capacity: usize, initializing: bool) !void {
+        const allocator = self.allocator;
+        self.capacity = new_capacity;
+        if(!initializing) self.freeSlices(); 
+
+        self.indices = try allocator.alloc(u32, new_capacity);
+        self.ids = try allocator.alloc(u32, new_capacity);
+        self.xs = try allocator.alloc(f32, new_capacity);
+        self.ys = try allocator.alloc(f32, new_capacity);
+        
+        switch(self.shape) {
+            .Rect => {
+                self.widths = try allocator.alloc(f32, new_capacity);
+                self.heights = try allocator.alloc(f32, new_capacity);
+            },
+            .Circle => self.radii = try allocator.alloc(f32, new_capacity),
+            else => {},
+        }
+    }
+
+    fn freeSlices(self: *Self) void {
+        const allocator = self.allocator;
+        allocator.free(self.indices);
+        allocator.free(self.ids);
+        allocator.free(self.xs);
+        allocator.free(self.ys);
+
+        if(self.widths) |*widths| allocator.free(widths.*);
+        if(self.heights) |*heights| allocator.free(heights.*);
+        if(self.radii) |*radii| allocator.free(radii);
+    }
+
+    fn deinit(self: *Self) void {
+        self.freeSlices();
+        self.allocator.free(self.counts);
+    }
+};

@@ -39,7 +39,7 @@ pub fn main(init: std.process.Init) !void {
     const config = try parseArgs(allocator, init.minimal.args);
     var grid: *SpacialGrid = try .init(.{
         .allocator = init.gpa,
-        .ent_capacity = config.ent_count, .width  = config.world_w,
+        .width  = config.world_w,
         .height = config.world_h,
         .cell_size_multiplier = 1.2,
         .multi_threaded = config.multi_threaded,
@@ -52,8 +52,9 @@ pub fn main(init: std.process.Init) !void {
     defer ents.deinit(allocator);
 
     try ents.ensureTotalCapacity(allocator, config.ent_count);
+    try grid.ensureCapacity(config.ent_count);
+
     var prng = getPrng(init.io);
-    
     var frames: std.ArrayList(FrameMeteric) = .empty;
     defer frames.deinit(allocator);
 
@@ -76,7 +77,6 @@ pub fn main(init: std.process.Init) !void {
     }{};
     defer profiler.deinit(allocator);
 
-
     const start = Clock.Timestamp.now(init.io, .awake);
     var i: usize = 0;
     // UPDATE LOOP
@@ -92,16 +92,14 @@ pub fn main(init: std.process.Init) !void {
 
         try generateEnts(allocator, &ents, &prng, config);
 
+        try grid.insertMAL(ents);
+
         const start_query = Clock.Timestamp.now(init.io, .awake);
 
         if (config.naive) try naiveCollisions(allocator, ents.items(.pos), ents.items(.shape_data), ents.items(.id))
         else {
-            try grid.setCellSize(ents.items(.shape_data));
-            try grid.update(.{
-                .positions = ents.items(.pos),
-                .shape_data = ents.items(.shape_data),
-                .indices = ents.items(.id)
-            });
+            try grid.setCellSize();
+            try grid.update();
         }
 
         const end_query = start_query.durationTo
@@ -156,9 +154,9 @@ fn generateEnts(allocator: std.mem.Allocator, ents: *std.MultiArrayList(Entity),
             unreachable;
         };
         try ents.append(allocator, .{
-            .pos = pos, 
+            .pos = pos,
             .shape_data = shape_data,
-            .id = i,
+            .id = @intCast(i),
         });
     }
 }
@@ -239,7 +237,7 @@ fn convertArg(comptime T: type, arg: []const u8, startsWith: []const u8) !?T {
     return null;
 } 
 
-fn naiveCollisions(allocator: std.mem.Allocator, positions: []Vector2, shape_data: []ShapeData, ids: []usize) !void {
+fn naiveCollisions(allocator: std.mem.Allocator, positions: []Vector2, shape_data: []ShapeData, ids: []u32) !void {
     var results: std.ArrayList(CollisionPair) = .empty;
     defer results.deinit(allocator);
 
@@ -248,7 +246,7 @@ fn naiveCollisions(allocator: std.mem.Allocator, positions: []Vector2, shape_dat
         for (i + 1..ids.len) |j| {
             const a = ids[i];
             const b = ids[j];
-            if (CD.checkColliding(positions[a], shape_data[a], positions[b], shape_data[b])) {
+            if (CD.checkColliding(positions[@intCast(a)], shape_data[@intCast(a)], positions[@intCast(b)], shape_data[@intCast(b)])) {
                 try results.append(allocator, .{ .a = a, .b = b });
             }
         }
@@ -260,12 +258,12 @@ const FrameMeteric = struct {
     median_dist: f32 = 0,
 
     fn setMedianDistance(
-        self: *FrameMeteric, 
-        allocator: std.mem.Allocator, 
-        prng: *std.Random.DefaultPrng, 
-        positions: []Vector2, 
-        ids: []usize
-    ) 
+        self: *FrameMeteric,
+        allocator: std.mem.Allocator,
+        prng: *std.Random.DefaultPrng,
+        positions: []Vector2,
+        ids: []u32
+    )
     !void {
         const sample_size: usize = 1000;
         const rand = prng.random();
@@ -277,8 +275,8 @@ const FrameMeteric = struct {
                 const id_a = ids[rand.intRangeAtMost(usize, 0, ids.len - 1)];
                 const id_b = ids[rand.intRangeAtMost(usize, 0, ids.len - 1)];
                 if(id_a >= id_b) continue;
-                const pos_a = positions[id_a]; 
-                const pos_b = positions[id_b]; 
+                const pos_a = positions[@intCast(id_a)];
+                const pos_b = positions[@intCast(id_b)];
 
                 const dx = pos_a.x - pos_b.x;
                 const dy = pos_a.y - pos_b.y;

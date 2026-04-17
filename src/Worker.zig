@@ -22,7 +22,7 @@ pub fn Worker(comptime setup: Setup) type {
         positions: []Vec2 = undefined,
         shape_data: []Shape = undefined,
         col_list: std.ArrayList(CollisionPair) = .empty,
-        query_buf: []usize = undefined,
+        query_buf: []u32 = undefined,
 
         pub fn init(grid: *Grid, buf_capacity: usize) !Self {
             var self = Self{
@@ -30,7 +30,7 @@ pub fn Worker(comptime setup: Setup) type {
                 .io = grid.impl.io,
                 .grid = grid,
             };
-            self.query_buf = try self.allocator.alloc(usize, buf_capacity);
+            self.query_buf = try self.allocator.alloc(u32, buf_capacity);
             return self;
         }
 
