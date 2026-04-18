@@ -1,0 +1,41 @@
+Good shape (pun intended). A few things to flag — some will bite you at compile time, one is a design
+  friction point worth noticing now.
+
+  1. Won't compile: optional handling in insert.
+  @memcpy(self.widths[self.ent_count..][0..widths.len], widths);
+  self.widths is ?[]f32, not []f32. You can't index or .len an optional. Same for the widths parameter.
+  You need to unwrap with .? or if/orelse:
+  @memcpy(self.widths.?[self.ent_count..][0..widths.?.len], widths.?);
+
+  2. Won't compile: bug in freeSlices.
+  if(self.radii) |*radii| allocator.free(radii);
+  With |*radii|, radii is *[]f32 (pointer to slice). allocator.free expects the slice itself. The
+  widths/heights lines above correctly use widths.*, but this one is missing the deref. Simpler fix: drop
+  the pointer capture entirely — you're only reading:
+  if (self.widths) |w| allocator.free(w);
+  if (self.heights) |h| allocator.free(h);
+  if (self.radii) |r| allocator.free(r);
+
+  3. Design smell: ShapeType enum + optionals are doing a comptime type parameter's job.
+
+  Every access to widths/radii has to switch on shape AND unwrap the optional. That's two runtime checks
+  for information that's knowable at compile time. The generic version would be:
+
+  fn EntStorage(comptime Data: type) type { ... }
+  // Then: circles: EntStorage(CircleData), rects: EntStorage(RectData)
+
+  Where CircleData = struct { radius: f32 }, RectData = struct { width: f32, height: f32 }, PointData =
+  void. No enum, no optionals, no switches. But it's a bigger refactor — fine to get this working first
+  and refactor once you see the hot loop.
+
+  4. initializing: bool flag is a smell. Boolean parameters force the caller to remember what true/false
+  means. Simpler: just check self.capacity == 0 inside ensureCapacity to decide whether to free. One less
+  parameter, one less thing to get wrong.
+
+  5. Minor: ids: []u32 in insert should be []const u32 (you're only reading). Same for the others. Cheap
+  correctness win.
+
+  Fix #1 and #2 first so it compiles, then decide whether #3 is worth doing before or after you wire up
+  build().
+
+✻ Sautéed for 48s
