@@ -11,73 +11,73 @@ pub fn CollisionDetection(comptime Vector2: type) type {
 
 return struct {
     /// Check if two entities are colliding
-    pub fn checkColliding(pos_a: Vector2, shape_a: Shape, pos_b: Vector2, shape_b: Shape) bool {
+    pub fn checkColliding(x_a: f32, y_a: f32, shape_a: Shape, x_b: f32, y_b: f32, shape_b: Shape) bool {
         return switch (shape_a) {
             .Circle => |r1| switch(shape_b) {
-                .Circle => |r2| circleCollision(pos_a, r1, pos_b, r2),
-                .Rect => |dim| rectCircleCollision(pos_b, dim, pos_a, r1),
-                .Point => pointCircleCollision(pos_a, r1, pos_b),
+                .Circle => |r2| circleCollision(x_a, y_a, r1, x_b, y_b, r2),
+                .Rect => |dim| rectCircleCollision(x_b, y_b, dim.x, dim.y, x_a, y_a, r1),
+                .Point => pointCircleCollision(x_a, y_a, r1, x_b, y_b),
             },
             .Rect => |dim1| switch(shape_b) {
-                .Circle => |r| rectCircleCollision(pos_a, dim1, pos_b, r),
-                .Rect => |dim2| rectCollision(pos_a, dim1, pos_b, dim2),
-                .Point => pointRectCollision(pos_a, dim1, pos_b)
+                .Circle => |r| rectCircleCollision(x_a, y_a, dim1.x, dim1.y, x_b, y_b, r),
+                .Rect => |dim2| rectCollision(x_a, y_a, dim1.x, dim1.y, x_b, y_b, dim2.x, dim2.y),
+                .Point => pointRectCollision(x_a, y_a, dim1.x, dim1.y, x_b, y_b),
             },
             .Point => switch(shape_b) {
-                .Circle => |r| pointCircleCollision(pos_b, r, pos_a),
-                .Rect => |dim| pointRectCollision(pos_b, dim, pos_a),
-                .Point => pointCollision(pos_b, pos_a),
+                .Circle => |r| pointCircleCollision(x_b, y_b, r, x_a, y_a),
+                .Rect => |dim| pointRectCollision(x_b, y_b, dim.x, dim.y, x_a, y_a),
+                .Point => pointCollision(x_a, y_a, x_b, y_b),
             }
         };
     }
 
     /// Check collision between two circles.
-    pub fn circleCollision(pos_a: Vector2, r_a: f32, pos_b: Vector2, r_b: f32) bool {
-        const dist = Vector2.getDistanceSq(pos_a, pos_b);
+    pub fn circleCollision(x_a: f32, y_a: f32, r_a: f32, x_b: f32, y_b: f32, r_b: f32) bool {
+        const dx = x_a - x_b;
+        const dy = y_a - y_b;
         const r = r_a + r_b;
-
-        return dist < (r * r);
+        return (dx * dx + dy * dy) < (r * r);
     }
 
-    /// Check collision between two Rectangles.  Assumes coordinates start at top left of rect.
-    pub fn rectCollision(pos_a: Vector2, dim_a: Vector2, pos_b: Vector2, dim_b: Vector2) bool {
+    /// Check collision between two rectangles. Assumes coordinates start at top left of rect.
+    pub fn rectCollision(x_a: f32, y_a: f32, w_a: f32, h_a: f32, x_b: f32, y_b: f32, w_b: f32, h_b: f32) bool {
         return (
-            (pos_a.x < pos_b.x + dim_b.x and pos_a.x + dim_a.x > pos_b.x)
-                                         and
-            (pos_a.y < pos_b.y + dim_b.y and pos_a.y + dim_a.y > pos_b.y)
+            (x_a < x_b + w_b and x_a + w_a > x_b)
+                             and
+            (y_a < y_b + h_b and y_a + h_a > y_b)
         );
     }
 
     /// Check collision between two points (if both points are equal).
-    pub fn pointCollision(point1: Vector2, point2: Vector2) bool {
-        return Vector2.eql(point1, point2);
+    pub fn pointCollision(x1: f32, y1: f32, x2: f32, y2: f32) bool {
+        return x1 == x2 and y1 == y2;
     }
 
-    /// Check collision between a circle and a rectangle.  Assumes coordinates start at top left for rectangle.
-    pub fn rectCircleCollision(rect_pos: Vector2, rect_dim: Vector2, circle_pos: Vector2, r: f32) bool {
-        const closest_x = @max(rect_pos.x, @min(circle_pos.x, rect_pos.x + rect_dim.x));
-        const closest_y = @max(rect_pos.y, @min(circle_pos.y, rect_pos.y + rect_dim.y));
+    /// Check collision between a circle and a rectangle. Assumes coordinates start at top left for rectangle.
+    pub fn rectCircleCollision(rect_x: f32, rect_y: f32, rect_w: f32, rect_h: f32, circle_x: f32, circle_y: f32, r: f32) bool {
+        const closest_x = @max(rect_x, @min(circle_x, rect_x + rect_w));
+        const closest_y = @max(rect_y, @min(circle_y, rect_y + rect_h));
 
-        const dx = circle_pos.x - closest_x;
-        const dy = circle_pos.y - closest_y;
+        const dx = circle_x - closest_x;
+        const dy = circle_y - closest_y;
 
         return (dx * dx + dy * dy) < (r * r);
     }
 
-    /// Check collision between a circle and a point
-    pub fn pointCircleCollision(pos_a: Vector2, r: f32, point: Vector2) bool {
-        const dist = Vector2.getDistanceSq(point, pos_a);
-        return (dist < r * r);
+    /// Check collision between a circle and a point.
+    pub fn pointCircleCollision(circle_x: f32, circle_y: f32, r: f32, point_x: f32, point_y: f32) bool {
+        const dx = point_x - circle_x;
+        const dy = point_y - circle_y;
+        return (dx * dx + dy * dy) < (r * r);
     }
 
-    /// Check collision between a rectangle and a point
-    pub fn pointRectCollision(pos_a: Vector2, dim: Vector2, point: Vector2) bool {
+    /// Check collision between a rectangle and a point.
+    pub fn pointRectCollision(rect_x: f32, rect_y: f32, rect_w: f32, rect_h: f32, point_x: f32, point_y: f32) bool {
         return (
-            (point.x >= pos_a.x and point.x <= pos_a.x + dim.x)
-                                and
-            (point.y >= pos_a.y and point.y <= pos_a.y + dim.y)
+            (point_x >= rect_x and point_x <= rect_x + rect_w)
+                               and
+            (point_y >= rect_y and point_y <= rect_y + rect_h)
         );
     }
 };
 }
-
