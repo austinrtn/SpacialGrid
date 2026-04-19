@@ -73,21 +73,18 @@ pub fn EntStorage(comptime shape_type: ShapeType) type {
         }
         
         pub fn insert(self: *Self, ids: []const u32, xs: []const f32, ys: []const f32, shape_data: ShapeDataType) !void {
-            const new_ent_count = self.ent_count + ids.len;
-            if(new_ent_count >= self.capacity) try self.ensureCapacity(new_ent_count * 2);
+            if(ids.len > self.capacity) try self.ensureCapacity(ids.len * 2);
 
-            @memcpy(self.ids[self.ent_count..][0..ids.len], ids);
-            @memcpy(self.xs[self.ent_count..][0..xs.len], xs);
-            @memcpy(self.ys[self.ent_count..][0..ys.len], ys);
+            @memcpy(self.ids[0..ids.len], ids);
+            @memcpy(self.xs[0..ids.len], xs);
+            @memcpy(self.ys[0..ids.len], ys);
 
-            inline for (std.meta.fields(ShapeDataType))|field| {
-                const current_data = @field(self.shape_data, field.name);
-                const new_data = @field(shape_data, field.name); 
-
-                @memcpy(current_data[self.ent_count..][0..new_data.len], new_data);
+            inline for (std.meta.fields(ShapeDataType)) |field| {
+                const new_data = @field(shape_data, field.name);
+                @memcpy(@field(self.shape_data, field.name)[0..new_data.len], new_data);
             }
 
-            self.ent_count += new_ent_count;
+            self.ent_count = ids.len;
         }
 
         pub fn build(self: *Self, grid: anytype) void {
@@ -147,28 +144,8 @@ pub fn EntStorage(comptime shape_type: ShapeType) type {
 
             return buf[0..len];
         }
+
+        pub fn getIndicesByShape(self: anytype) []u32 {
+        }
     };
 }
-
-// pub fn main(init: std.process.Init) !void {
-//     const allocator = init.gpa;
-//     const count = 1000;
-//     const Ents = struct {
-//         ids: [count]u32,
-//         xs: [count]f32, 
-//         ys: [count]f32,
-//         widths:[count]f32,
-//         heights:[count]f32,
-//     }; 
-//     var ents: Ents = undefined;
-//
-//     inline for(std.meta.fields(@TypeOf(ents))) |field| {
-//         const slice = &@field(ents, field.name);
-//         @memset(slice, 0);
-//     }
-//
-//     var storage: EntStorage(.Rect) = try .init(allocator, 12, 12, count);
-//     defer storage.deinit();
-//     
-//     storage.insert(&ents.ids, &ents.xs, &ents.ys, .{.widths = &ents.widths, .heights = &ents.heights});
-// 

@@ -10,6 +10,7 @@ const Setup = @import("ZigGridLib.zig").Setup;
 const ShapeTypeMod = @import("ShapeType.zig");
 const ShapeType = ShapeTypeMod.ShapeType;
 const ShapeData = ShapeTypeMod.ShapeData;
+
 const EntStorage = @import("EntStorage.zig").EntStorage;
 
 /// The Entity data required for SpacialGrid.update
@@ -143,48 +144,126 @@ return struct {
 
         pub fn findCollisions(
             self: *@This(),
-            grid: anytype,
-            col_list: *std.ArrayList(CollisionPair),
+            work_item: WorkItem,
             query_buf: []u32,
+            col_list: *std.ArrayList(CollisionPair),
         ) void {
-            const circles = &grid.impl.circle_storage;
+            switch (work_item.kernel) {
+                .cc => {
+                    self.findCollision(.Circle, .Circle, work_item, col_list, query_buf);
+                },
+                .rr => {
+                    self.findCollision(.Rect, .Rect, work_item, col_list, query_buf);
+                },
+                .pp => {
+                    self.findCollision(.Point, .Point, work_item, col_list, query_buf);
+                },
+                .cr => {
+                    if(self.circle_storage.ent_count < self.rect_storage.ent_count)
+                        self.findCollision(.Circle, .Rect, work_item, col_list, query_buf)
+                    else
+                        self.findCollision(.Rect, .Circle, work_item, col_list, query_buf);
+                },
+                .cp => {
+                    if(self.circle_storage.ent_count < self.point_storage.ent_count)
+                        self.findCollision(.Circle, .Point, work_item, col_list, query_buf)
+                    else
+                        self.findCollision(.Point, .Circle, work_item, col_list, query_buf);
+                },
+                .rp => {
+                    if(self.rect_storage.ent_count < self.point_storage.ent_count)
+                        self.findCollision(.Rect, .Point, work_item, col_list, query_buf)
+                    else
+                        self.findCollision(.Point, .Rect, work_item, col_list, query_buf);
+                },
+            }
+        }
 
-            //Circle-Circle collision
-            for(circles.indices) |id_a|{
-                const x_a = circles.xs[id_a];
-                const y_a = circles.ys[id_a];
-                const r_a = circles.shape_data.radii[id_a];
+        fn findCollision(self: *@This(), comptime outer_shape: ShapeType, comptime inner_shape: ShapeType, work_item: WorkItem,
+                            col_list: *std.ArrayList(CollisionPair), buf: []u32) void {
 
-                const nearby = circles.query(x_a, y_a);
-                for(nearby) |id_b| {
-                    if(id_a >= id_b) continue;
+            const cd = CollisionDetection(Vec2);
+            const outer_storage = switch (outer_shape) {
+                    .Circle => self.circle_storage,
+                    .Rect => self.rect_storage,
+                    .Point => self.point_storage,
+            };
 
-                    const x_b = circles.xs[id_b];
-                    const y_b = circles.ys[id_b];
-                    const r_b = circles.shape_data.radii[id_b];
+            const inner_storage = switch (inner_shape) {
+                    .Circle => self.circle_storage,
+                    .Rect => self.rect_storage,
+                    .Point => self.point_storage,
+            };
+
+            for(work_item.indicies) |idx_a_u32| {
+                const idx_a: usize = @intCast(idx_a_u32);
+                const x_a = outer_storage.xs[idx_a];
+                const y_a = outer_storage.ys[idx_a];
+                const id_a = outer_storage.ids[idx_a];
+
+                const nearby = inner_storage.query(x_a, y_a, buf) catch continue;
+                for(nearby) |idx_b_u32| {
+                    const idx_b: usize = @intCast(idx_b_u32);
+                    if (outer_shape == inner_shape and idx_a >= idx_b) continue;
+
+                    const x_b = inner_storage.xs[idx_b];
+                    const y_b = inner_storage.ys[idx_b];
+                    const id_b = inner_storage.ids[idx_b];
                     
-                    if(CollisionDetection(Vec2).circleCollision(x_a, y_a, r_a, x_b, y_b, r_b))
-                        col_list.append(self.allocator, .{.a = id_a, .b = id_b }) catch continue;
+                    const pair: CollisionPair = .{.a = id_a, .b = id_b};
+                    var colliding: bool = false;
+                    switch (outer_shape) {
+                        .Circle => {
+                            const r_a = outer_storage.shape_data.radii[idx_a];
+                            switch (inner_shape) {
+                                .Circle => {
+                                    const r_b = inner_storage.shape_data.radii[idx_b];
+                                    colliding = cd.circleCollision(x_a, y_a, r_a, x_b, y_b, r_b);
+                                },
+                                .Rect => {
+                                    const w_b = inner_storage.shape_data.widths[idx_b];
+                                    const h_b = inner_storage.shape_data.heights[idx_b];
+                                    colliding = cd.rectCircleCollision(x_b, y_b, w_b, h_b, x_a, y_a, r_a);
+                                },
+                                .Point => colliding = cd.pointCircleCollision(x_a, y_a, r_a, x_b, y_b),
+                            }
+                        }, 
+                        .Rect => {
+                            const w_a = outer_storage.shape_data.widths[idx_a];
+                            const h_a = outer_storage.shape_data.heights[idx_a];
+                            switch (inner_shape) {
+                                .Circle => {
+                                    const r_b = inner_storage.shape_data.radii[idx_b];
+                                    colliding = cd.rectCircleCollision(x_a, y_a, w_a, h_a, x_b, y_b, r_b);
+                                },
+                                .Rect => {
+                                    const w_b = inner_storage.shape_data.widths[idx_b];
+                                    const h_b = inner_storage.shape_data.heights[idx_b];
+                                    colliding = cd.rectCollision(x_a, y_a, w_a, h_a, x_b, y_b, w_b, h_b);
+                                },
+                                .Point => colliding = cd.pointRectCollision(x_a, y_a, w_a, h_a, x_b, y_b),
+                            }
+                        },
+                        .Point => {
+                            switch (inner_shape) {
+                                .Circle => {
+                                    const r_b = inner_storage.shape_data.radii[idx_b];
+                                    colliding = cd.pointCircleCollision(x_b, y_b, r_b, x_a, y_a);
+                                },
+                                .Rect => {
+                                    const w_b = inner_storage.shape_data.widths[idx_b];
+                                    const h_b = inner_storage.shape_data.heights[idx_b];
+                                    colliding = cd.pointRectCollision(x_b, y_b, w_b, h_b, x_a, y_a);
+                                },
+                                .Point => colliding = cd.pointCollision(x_a, y_a, x_b, y_b),
+                            }
+                        }
+                    }
+
+                    if(colliding) col_list.append(self.allocator, pair) catch continue;
                 }
             }
-        
-            // for(indices) |id_a| {
-            //     const pos_a = positions[@intCast(id_a)];
-            //     const shape_a = shape_data[@intCast(id_a)];
-            //
-            //     const nearby = grid.query(pos_a, query_buf) catch continue;
-            //
-            //     for(nearby) |id_b| {
-            //         if(id_a >= id_b) continue;
-            //
-            //         const pos_b = positions[@intCast(id_b)];
-            //         const shape_b = shape_data[@intCast(id_b)];
-            //
-            //         if(CollisionDetection(Vec2).checkColliding(pos_a, shape_a, pos_b, shape_b)) {
-            //             col_list.append(self.allocator, .{ .a = id_a, .b = id_b }) catch continue;
-            //         }
-            //     }
-            }
+        }
     };
 
     impl: Impl,
@@ -206,8 +285,6 @@ return struct {
                 .height = config.height,
                 .rows = rows,
                 .cols = cols,
-                .counts = undefined,
-                .indices = undefined,
                 .workers = undefined,
                 .multi_threaded = config.multi_threaded,
                 .thread_count = config.thread_count,
@@ -261,29 +338,6 @@ return struct {
         allocator.destroy(self);
     }
 
-    /// Add entities into the spacial grid
-    pub fn insert(self: *Self, ids: []const u32, positions: []const Vec2, shape: ShapeType, ) !void {
-
-        // Resize if the new ent count passed in is greater than capacity
-        const projected_ent_count: usize = @as(usize, self.impl.ent_count) + ids.len;
-        if(projected_ent_count > @as(usize, self.impl.ent_capacity)) try self.ensureCapacity(projected_ent_count * 2);
-
-        const ent_count: usize = @intCast(self.impl.ent_count);
-        for(ids, 0..) |id, i| {
-            self.impl.ids[ent_count + i] = id;
-        }
-
-        for(positions, 0..) |pos, i| {
-            self.impl.positions[ent_count + i] = pos;
-        }
-
-        for(shape_data, 0..) |shape, i| {
-            self.impl.shape_data[ent_count + i] = shape;
-        }
-
-        self.impl.ent_count = @intCast(projected_ent_count);
-    }
-
     pub fn insertCircles(self: *Self, ids: []const u32, xs: []const f32, ys: []const f32, radii: []const f32) !void {
         if(self.impl.has_updated) {
             self.reset();
@@ -314,10 +368,48 @@ return struct {
         self.impl.ent_count = 0;
     }
 
-    pub fn build(self: *Self) void {
+    pub fn build(self: *Self) !void {
         self.impl.circle_storage.build(self);
         self.impl.rect_storage.build(self);
         self.impl.point_storage.build(self);
+
+        if(self.impl.multi_threaded) try self.generateWorkQueue();
+    }
+
+    fn generateWorkQueue(self: *Self) !void {
+        const circle_count = self.impl.circle_storage.ent_count;
+        const rect_count = self.impl.rect_storage.ent_count;
+        const point_count = self.impl.point_storage.ent_count;
+
+        try self.generateKernelItems(.cc, circle_count);
+        try self.generateKernelItems(.rr, rect_count);
+        try self.generateKernelItems(.pp, point_count);
+
+        try self.generateKernelItems(
+            if (circle_count <= rect_count) .cr else .rc, 
+            @min(circle_count, rect_count)
+        );
+
+        try self.generateKernelItems(
+            if (circle_count <= point_count) .cp else .pc, 
+            @min(circle_count, point_count)
+        );
+
+        try self.generateKernelItems(
+            if (rect_count <= point_count) .rp else .pr, 
+            @min(rect_count, point_count)
+        );
+    }
+
+    fn generateKernelItems(self: *Self, kernel: WorkItem.Kernel, count: usize) !void {
+        const slice_unit: usize = 250;
+        const queue = &self.impl.work_queue; 
+        
+        var i: usize = 0;
+        while(i < count) : (i += slice_unit) {
+            const end = @min(i + slice_unit, count);
+            try queue.appendWork(.init(kernel, i, end));
+        }
     }
 
     /// Get entities from cell of and neighboring cells of position
@@ -365,10 +457,6 @@ return struct {
 
     /// Allocate new buffers to accommodate new entity count
     pub fn ensureCapacity(self: *Self, capacity: usize) !void {
-        self.impl.allocator.free(self.impl.indices);
-        self.impl.allocator.free(self.impl.ids);
-        self.impl.allocator.free(self.impl.positions);
-        self.impl.allocator.free(self.impl.shape_data);
         self.impl.allocator.free(self.impl.query_buf);
         if(self.impl.multi_threaded) {
             for(self.impl.workers) |*w| w.allocator.free(w.query_buf);
@@ -376,10 +464,7 @@ return struct {
 
         const new_cap: usize = @max(capacity, @as(usize, self.impl.ent_capacity) * 2);
         self.impl.ent_capacity = @intCast(new_cap);
-        self.impl.indices = try self.impl.allocator.alloc(u32, new_cap);
         self.impl.ids = try self.impl.allocator.alloc(u32, new_cap);
-        self.impl.positions = try self.impl.allocator.alloc(Vec2, new_cap);
-        self.impl.shape_data = try self.impl.allocator.alloc(Shape, new_cap);
         self.impl.query_buf = try self.impl.allocator.alloc(u32, new_cap);
         if(self.impl.multi_threaded) {
             for(self.impl.workers) |*w| w.query_buf = try w.allocator.alloc(u32, new_cap);

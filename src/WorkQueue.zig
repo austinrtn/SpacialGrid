@@ -1,14 +1,16 @@
 const std = @import("std");
 
 pub const WorkItem = struct {
-    pub const Kernel = enum {cc, cr, cp, rr, rp, pp};
+    pub const Kernel = enum {cc, cr, cp, rr, rc, rp, pp, pc, pr};
     kernel: Kernel,
-    indicies: []u32,
+    start: usize,
+    end: usize,
 
-    fn init(kernel: Kernel, indicies: []u32) WorkItem {
+    pub fn init(kernel: Kernel, start: usize, end: usize) WorkItem {
         return .{
             .kernel = kernel,
-            .indicies = indicies,
+            .start = start,
+            .end = end,
         };
     }
 };
@@ -28,6 +30,10 @@ pub const WorkQueue = struct {
 
     pub fn deinit(self: *WorkQueue) void {
         self.work.deinit(self.allocator);
+    }
+
+    pub fn appendWork(self: *WorkQueue, work: WorkItem) !void {
+        try self.work.append(self.allocator, work); 
     }
 
     pub fn reset(self: *WorkQueue) void {
