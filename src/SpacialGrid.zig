@@ -2,7 +2,10 @@ const std = @import("std");
 const CollisionDetection = @import("CollisionDetection.zig").CollisionDetection;
 const Vector2 = @import("Vector2.zig").Vector2;
 const Worker = @import("Worker.zig").Worker;
-const WorkQueue = @import("WorkQueue.zig").WorkQueue;
+const WorkQueueMod = @import("WorkQueue.zig");
+const WorkQueue = WorkQueueMod.WorkQueue;
+const WorkItem = WorkQueueMod.WorkItem;
+
 const Setup = @import("ZigGridLib.zig").Setup;
 const ShapeTypeMod = @import("ShapeType.zig");
 const ShapeType = ShapeTypeMod.ShapeType;
@@ -141,9 +144,6 @@ return struct {
         pub fn findCollisions(
             self: *@This(),
             grid: anytype,
-            indices: []u32,
-            positions: []Vec2,
-            shape_data: []Shape,
             col_list: *std.ArrayList(CollisionPair),
             query_buf: []u32,
         ) void {
@@ -167,6 +167,7 @@ return struct {
                         col_list.append(self.allocator, .{.a = id_a, .b = id_b }) catch continue;
                 }
             }
+        
             // for(indices) |id_a| {
             //     const pos_a = positions[@intCast(id_a)];
             //     const shape_a = shape_data[@intCast(id_a)];
@@ -183,8 +184,7 @@ return struct {
             //             col_list.append(self.allocator, .{ .a = id_a, .b = id_b }) catch continue;
             //         }
             //     }
-            // }
-        }
+            }
     };
 
     impl: Impl,
