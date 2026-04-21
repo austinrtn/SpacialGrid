@@ -32,13 +32,13 @@ pub const WorkQueue = struct {
         self.work.deinit(self.allocator);
     }
 
-    pub fn appendWork(self: *WorkQueue, work: WorkItem) !void {
-        try self.work.append(self.allocator, work); 
-    }
-
     pub fn reset(self: *WorkQueue) void {
         self.work.clearRetainingCapacity();
         self.index = 0;
+    }
+
+    pub fn appendWork(self: *WorkQueue, work: WorkItem) !void {
+        try self.work.append(self.allocator, work); 
     }
 
     pub fn getNextWorkItem(self: *WorkQueue) !?WorkItem{
@@ -46,8 +46,8 @@ pub const WorkQueue = struct {
         defer self.mu.unlock(self.io);
 
         if(self.index >= self.work.items.len) return null; 
-        defer self.index +=1;
 
+        defer self.index +=1;
         return self.work.items[self.index];
     }
 };

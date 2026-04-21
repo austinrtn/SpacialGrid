@@ -5,8 +5,6 @@ const CollisionPair = @import("SpacialGrid.zig").CollisionPair;
 
 pub fn Worker(comptime setup: Setup) type {
     const Grid = SpacialGrid(setup);
-    const Vec2 = setup.Vector2;
-    const Shape = Grid.ShapeData;
 
     return struct {
         const Self = @This();
@@ -19,8 +17,6 @@ pub fn Worker(comptime setup: Setup) type {
         grid: *Grid = undefined,
         thread: std.Thread = undefined,
 
-        positions: []Vec2 = undefined,
-        shape_data: []Shape = undefined,
         col_list: std.ArrayList(CollisionPair) = .empty,
         query_buf: []u32 = undefined,
 
@@ -43,11 +39,6 @@ pub fn Worker(comptime setup: Setup) type {
             self.allocator.free(self.query_buf);
         }
 
-        pub fn set(self: *Self, positions: []Vec2, shape_data: []Shape) void {
-            self.positions = positions;
-            self.shape_data = shape_data;
-        }
-
         pub fn spawn(self: *Self) !void {
             self.thread = try .spawn(
                 .{.allocator = self.allocator},
@@ -63,17 +54,12 @@ pub fn Worker(comptime setup: Setup) type {
 
                 const queue = &self.grid.impl.work_queue;
                 while(
-                    queue.getNextCellChunk(self.grid)
-                    catch @panic("Mutex Cancled Error in WorkerQueue.zig\n"))
-                |chunk| {
-                    if (chunk.len == 0) continue;
-                    self.grid.impl.findCollisions(
-                        self.grid, chunk, self.positions, self.shape_data,
-                        &self.col_list, self.query_buf,
-                    );
-                }
+                    queue.getNextWorkItem(self.grid)
+                    catch @panic("Mutex Cancled Error in WorkerQueue.zig\n")
+                ) |item| 
 
-                self.done_semaphore.post(self.io);
+                    self.grid.impl.findCollisions(item, self.query_buf, &self.col_list);
+                    self.done_semaphore.post(self.io);
             }
         }
     };

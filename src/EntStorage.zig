@@ -144,8 +144,5 @@ pub fn EntStorage(comptime shape_type: ShapeType) type {
 
             return buf[0..len];
         }
-
-        pub fn getIndicesByShape(self: anytype) []u32 {
-        }
     };
 }

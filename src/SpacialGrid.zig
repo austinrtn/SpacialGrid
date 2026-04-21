@@ -96,7 +96,10 @@ return struct {
 
         workers: []Worker(setup) = undefined, // Used for deviding work durring mulithreading
         work_queue: WorkQueue = undefined, // Where workers pull their "work"
+
+        query_results: []u32 = undefined,
         query_buf: []u32 = undefined, // Used for querying entities in a single threaded context
+        col_list: std.ArrayList(CollisionPair) = .empty,
         has_updated: bool = false,
 
         pub fn getCellIndex(self: @This(), row: i32, col: i32) !usize {
@@ -295,6 +298,7 @@ return struct {
         self.impl.rect_storage = .init(config.allocator, rows, cols);
         self.impl.point_storage = .init(config.allocator, rows, cols);
 
+        self.impl.query_results = try config.allocator.alloc(u32, 0);
         self.impl.query_buf = try config.allocator.alloc(u32, 0);
 
         // Setting the thread count does not enable multi threading by itself
@@ -334,6 +338,8 @@ return struct {
             allocator.free(self.impl.workers);
         }
 
+        allocator.free(self.impl.query_results);
+        self.impl.col_list.deinit(allocator);
         self.results.deinit(self.impl.allocator);
         allocator.destroy(self);
     }
@@ -377,6 +383,7 @@ return struct {
     }
 
     fn generateWorkQueue(self: *Self) !void {
+        self.impl.work_queue.reset();
         const circle_count = self.impl.circle_storage.ent_count;
         const rect_count = self.impl.rect_storage.ent_count;
         const point_count = self.impl.point_storage.ent_count;
@@ -412,19 +419,76 @@ return struct {
         }
     }
 
+    const QueryIndices = struct {
+        allocator: std.mem.Allocator,
+        c_buf: []u32,
+        c_indices: []u32, 
+
+        r_buf: []u32,
+        r_indices: []u32, 
+
+        p_buf: []u32,
+        p_indices: []u32, 
+        total_count: usize = 0,
+
+        fn init(grid: Self, x: f32, y: f32) !QueryIndices {
+            const allocator = grid.impl.allocator;
+            var self: QueryIndices = undefined; 
+            self.allocator = allocator;
+
+            self.c_buf = try allocator.alloc(u32, grid.impl.circle_storage.ent_count);
+            self.r_buf = try allocator.alloc(u32, grid.impl.rect_storage.ent_count);
+            self.p_buf = try allocator.alloc(u32, grid.impl.point_storage.ent_count);
+
+            self.c_indices = try grid.impl.circle_storage.query(grid, x, y, self.c_buf);
+            self.r_indices = try grid.impl.circle_storage.query(grid, x, y, self.r_buf);
+            self.p_indices = try grid.impl.circle_storage.query(grid, x, y, self.p_buf);
+
+            self.total_count = self.c_indices.len + self.r_indices.len + self.p_indices.len;
+        }
+
+        fn deinit(self: *QueryIndices) void {
+            self.allocator.free(self.c_buf);
+            self.allocator.free(self.r_buf);
+            self.allocator.free(self.p_buf);
+        }
+    };
+
     /// Get entities from cell of and neighboring cells of position
-    pub fn query(self: *Self, x: f32, y: f32, buf: []u32) ![]u32 {
-        try self.impl.circle_storage.query(self, x, y, buf);
+    pub fn query(self: *Self, x: f32, y: f32) ![]u32 {
+        var ents = try QueryIndices.init(self, x, y);
+        defer ents.deinit();
+
+        const qr = &self.impl.query_results;
+        qr.* = try self.impl.allocator.realloc(qr.*, ents.total_count);
+        const buf = qr.*;
+
+        var pos: usize = 0;
+        for (ents.c_indices) |idx| {
+            buf[pos] = self.impl.circle_storage.ids[@intCast(idx)];
+            pos += 1;
+        }
+        for (ents.r_indices) |idx| {
+            buf[pos] = self.impl.rect_storage.ids[@intCast(idx)];
+            pos += 1;
+        }
+        for (ents.p_indices) |idx| {
+            buf[pos] = self.impl.point_storage.ids[@intCast(idx)];
+            pos += 1;
+        }
+
+        return buf;
+    }
+
+    pub fn queryAndDetect(self: *Self, x: f32, y: f32, width: ?f32, height: ?f32, r: ?f32) !*std.ArrayList(CollisionPair){
+        try self.query(x, y);
+
+
     }
 
     /// Main collision detection loop
-    pub fn update(self: *Self) !void {
+    pub fn update(self: *Self) !*std.ArrayList(CollisionPair) {
         const workers = self.impl.workers;
-        
-        const ent_count: usize = @intCast(self.impl.ent_count);
-        const ids = self.impl.ids[0..ent_count];
-        const positions = self.impl.positions;
-        const shape_data = self.impl.shape_data;
 
         // Insert entities into the grid 
         self.results.clearRetainingCapacity();
@@ -432,17 +496,17 @@ return struct {
 
         // If not multi_threaded, just call findCollisions, else run workers
         if(!self.impl.multi_threaded) {
-            self.impl.findCollisions(self, ids, positions, shape_data, &self.results, self.impl.query_buf);
+            for(self.impl.work_queue.getNextWorkItem()) |item| {
+                try self.impl.findCollisions(item, self.impl.query_buf, self.impl.col_list);
+            }
             self.impl.has_updated = true;
-            return;
+            return &self.results;
         }
 
         // Have workers look for and save collisions 
         self.impl.work_queue.reset();
         for(workers) |*w| {
             w.col_list.clearRetainingCapacity();
-
-            w.set(positions, shape_data);
             w.work_semaphore.post(self.impl.io);
         }
 
@@ -453,19 +517,36 @@ return struct {
         }
 
         self.impl.has_updated = true;
+        return &self.results;
     }
 
-    /// Allocate new buffers to accommodate new entity count
-    pub fn ensureCapacity(self: *Self, capacity: usize) !void {
+    /// Reallocate buffers to accommodate new entity count.  Leave null to reallocate space for all 
+    /// shapes
+    pub fn ensureCapacity(self: *Self, capacity: usize, shape: ?ShapeType) !void {
+        if(shape) |s| switch(s) {
+            .Circle => self.impl.circle_storage.ensureCapacity(capacity),
+            .Rect => self.impl.rect_storage.ensureCapacity(capacity),
+            .Point => self.impl.point_storage.ensureCapacity(capacity),
+        } else {
+            try self.impl.circle_storage.ensureCapacity(capacity);
+            try self.impl.rect_storage.ensureCapacity(capacity);
+            try self.impl.point_storage.ensureCapacity(capacity);
+        }
+
+        const new_cap: usize = @max(
+            self.impl.circle_storage.ensurecapacity,
+            self.impl.rect_storage.ensurecapacity,
+            self.impl.point_storage.ensurecapacity,
+        );
+
         self.impl.allocator.free(self.impl.query_buf);
         if(self.impl.multi_threaded) {
             for(self.impl.workers) |*w| w.allocator.free(w.query_buf);
         }
 
-        const new_cap: usize = @max(capacity, @as(usize, self.impl.ent_capacity) * 2);
         self.impl.ent_capacity = @intCast(new_cap);
-        self.impl.ids = try self.impl.allocator.alloc(u32, new_cap);
         self.impl.query_buf = try self.impl.allocator.alloc(u32, new_cap);
+
         if(self.impl.multi_threaded) {
             for(self.impl.workers) |*w| w.query_buf = try w.allocator.alloc(u32, new_cap);
         }
