@@ -471,14 +471,13 @@ return struct {
         // If not multi_threaded, just call findCollisions, else run workers
         if(!self.impl.multi_threaded) {
             while(try self.impl.work_queue.getNextWorkItem()) |item| {
-                self.impl.findCollisions(self, item, self.impl.query_buf, &self.impl.col_list);
+                self.impl.findCollisions(self, item, self.impl.query_buf, &self.results);
             }
             self.impl.has_updated = true;
             return &self.results;
         }
 
-        // Have workers look for and save collisions 
-        self.impl.work_queue.reset();
+        // Have workers look for and save collisions
         for(workers) |*w| {
             w.col_list.clearRetainingCapacity();
             w.work_semaphore.post(self.impl.io);
