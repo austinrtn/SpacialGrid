@@ -296,8 +296,9 @@ return struct {
                 try w.spawn();
             }
 
-            self.impl.work_queue = .init(config.allocator, config.io);
         }
+
+        self.impl.work_queue = .init(config.allocator, config.io);
         try self.results.ensureTotalCapacity(self.impl.allocator, @intCast(self.impl.ent_capacity));
 
         return self;
