@@ -507,9 +507,9 @@ return struct {
         }
 
         const new_cap: usize = @max(
-            self.impl.circle_storage.ent_count,
-            self.impl.rect_storage.ent_count,
-            self.impl.point_storage.ent_count,
+            self.impl.circle_storage.capacity,
+            self.impl.rect_storage.capacity,
+            self.impl.point_storage.capacity,
         );
 
         self.impl.allocator.free(self.impl.query_buf);
