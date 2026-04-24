@@ -575,8 +575,8 @@ return struct {
             self.p_buf = try allocator.alloc(u32, grid.impl.point_storage.ent_count);
 
             self.c_indices = try grid.impl.circle_storage.query(grid, x, y, self.c_buf);
-            self.r_indices = try grid.impl.circle_storage.query(grid, x, y, self.r_buf);
-            self.p_indices = try grid.impl.circle_storage.query(grid, x, y, self.p_buf);
+            self.r_indices = try grid.impl.rect_storage.query(grid, x, y, self.r_buf);
+            self.p_indices = try grid.impl.point_storage.query(grid, x, y, self.p_buf);
 
             self.total_count = self.c_indices.len + self.r_indices.len + self.p_indices.len;
         }
