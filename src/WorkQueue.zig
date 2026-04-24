@@ -17,6 +17,7 @@ pub const WorkItem = struct {
 
 pub const WorkQueue = struct {
     allocator: std.mem.Allocator,
+    io: std.Io,
     mu: std.Io.Mutex = .init,
     work: std.ArrayList(WorkItem) = .empty,
     index: usize = 0,

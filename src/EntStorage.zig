@@ -11,7 +11,7 @@ pub fn EntStorage(comptime shape_type: ShapeType) type {
             else => void,
         };
 
-        allocator: std.mem.Allocator,
+allocator: std.mem.Allocator,
         inited: bool = false,
 
         shape: ShapeType = shape_type,
@@ -27,14 +27,12 @@ pub fn EntStorage(comptime shape_type: ShapeType) type {
 
         shape_data: ShapeDataType = undefined,
 
-        pub fn init(allocator: std.mem.Allocator, rows: u32, cols: u32) !Self {
+        pub fn init(allocator: std.mem.Allocator) !Self {
             var self: Self = .{.allocator = allocator,};
             defer self.inited = true;
 
-            self.counts = try allocator.alloc(u32, rows * cols);
-            @memset(self.counts, 0);
-
             try self.ensureCapacity(0);
+            try self.setCounts(0, 0);
 
             return self; 
         }
@@ -46,14 +44,20 @@ pub fn EntStorage(comptime shape_type: ShapeType) type {
             allocator.free(self.xs);
             allocator.free(self.ys);
 
-            inline for(std.meta.fields(ShapeDataType)) |field| {
-                allocator.free(@field(self.shape_data, field.name)); 
+            if (ShapeDataType != void) {
+                inline for (std.meta.fields(ShapeDataType)) |field| {
+                    allocator.free(@constCast(@field(self.shape_data, field.name)));
+                }
             }
         }
 
         pub fn deinit(self: *Self) void {
             self.freeSlices();
             self.allocator.free(self.counts);
+        }
+
+        pub fn reset(self: *Self) void {
+            @memset(self.counts, 0);
         }
 
         pub fn ensureCapacity(self: *Self, new_capacity: usize) !void {
@@ -66,10 +70,16 @@ pub fn EntStorage(comptime shape_type: ShapeType) type {
             self.xs = try allocator.alloc(f32, new_capacity);
             self.ys = try allocator.alloc(f32, new_capacity);
             
-            inline for (std.meta.fields(ShapeDataType))|field| {
-                const shape_d = &@field(self.shape_data, field.name);
-                shape_d.* = try allocator.alloc(f32, new_capacity);
+            if (ShapeDataType != void) {
+                inline for (std.meta.fields(ShapeDataType)) |field| {
+                    @field(self.shape_data, field.name) = try allocator.alloc(f32, new_capacity);
+                }
             }
+        }
+
+        pub fn setCounts(self: *Self, rows: usize, cols: usize) !void {
+            self.counts = try self.allocator.alloc(u32, rows * cols);
+            @memset(self.counts, 0);
         }
         
         pub fn insert(self: *Self, ids: []const u32, xs: []const f32, ys: []const f32, shape_data: ShapeDataType) !void {
@@ -79,9 +89,11 @@ pub fn EntStorage(comptime shape_type: ShapeType) type {
             @memcpy(self.xs[0..ids.len], xs);
             @memcpy(self.ys[0..ids.len], ys);
 
-            inline for (std.meta.fields(ShapeDataType)) |field| {
-                const new_data = @field(shape_data, field.name);
-                @memcpy(@field(self.shape_data, field.name)[0..new_data.len], new_data);
+            if (ShapeDataType != void) {
+                inline for (std.meta.fields(ShapeDataType)) |field| {
+                    const new_data = @field(shape_data, field.name);
+                    @memcpy(@constCast(@field(self.shape_data, field.name))[0..new_data.len], new_data);
+                }
             }
 
             self.ent_count = ids.len;
@@ -137,12 +149,24 @@ pub fn EntStorage(comptime shape_type: ShapeType) type {
 
             var len: usize = 0;
             for (neighbors) |cell_index| {
-                const slice = self.impl.getEntsFromCell(cell_index);
+                const slice = self.getEntsFromCell(cell_index);
                 @memcpy(buf[len..len + slice.len], slice);
                 len += slice.len;
             }
 
             return buf[0..len];
+        }
+
+        pub fn getLargestSize(self: *Self) f32 {
+            var size: f32 = 0;
+            switch(shape_type) {
+                .Circle => for(self.shape_data.radii) |r| { size = @max(size, r*2); },
+                .Rect => for(self.shape_data.widths, self.shape_data.heights) |w, h| {
+                    size = @max(size, w, h);
+                },
+                else => unreachable,
+            }
+            return size;
         }
     };
 }

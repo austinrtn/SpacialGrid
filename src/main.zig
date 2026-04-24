@@ -5,14 +5,17 @@ const Clock = std.Io.Clock;
 
 const ZigGridLib = @import("ZigGridLib").ZigGridLib(.{});
 const CollisionDetection = ZigGridLib.CollisionDetection;
+
 const SpacialGrid = ZigGridLib.SpacialGrid;
 const CollisionPair = ZigGridLib.CollisionPair;
-const Vector2   = ZigGridLib.Vector2;
 const ShapeData = SpacialGrid.ShapeData;
-const Entity    = SpacialGrid.Entity;
+
+const CircleEnt = struct { id: u32, x: f32, y: f32, r: f32 };
+const RectEnt   = struct { id: u32, x: f32, y: f32, w: f32, h: f32 };
+const PointEnt  = struct { id: u32, x: f32, y: f32 };
 
 const Config = struct {
-    world_w: f32 = 1000, 
+    world_w: f32 = 1000,
     world_h: f32 = 1000,
     timeout: i64 = 5,
     ent_count: usize = 1500,
@@ -25,7 +28,7 @@ const Config = struct {
     shape: enum {Rect, Circle, All} = .All,
     update_stdout: bool = false,
     multi_threaded: bool = false,
-    thread_count: ?usize = null, 
+    thread_count: ?usize = null,
     naive: bool = false,
 };
 
@@ -42,17 +45,24 @@ pub fn main(init: std.process.Init) !void {
         .width  = config.world_w,
         .height = config.world_h,
         .cell_size_multiplier = 1.2,
-        .multi_threaded = config.multi_threaded,
+        .multi_threaded = true,
         .thread_count = config.thread_count,
         .io = init.io,
     });
     defer grid.deinit();
 
-    var ents: std.MultiArrayList(Entity) = .empty;
-    defer ents.deinit(allocator);
+    var circles: std.MultiArrayList(CircleEnt) = .empty;
+    var rects:   std.MultiArrayList(RectEnt)   = .empty;
+    var points:  std.MultiArrayList(PointEnt)  = .empty;
+    defer circles.deinit(allocator);
+    defer rects.deinit(allocator);
+    defer points.deinit(allocator);
 
-    try ents.ensureTotalCapacity(allocator, config.ent_count);
-    try grid.ensureCapacity(config.ent_count);
+    try circles.ensureTotalCapacity(allocator, config.ent_count);
+    try rects.ensureTotalCapacity(allocator, config.ent_count);
+    try points.ensureTotalCapacity(allocator, config.ent_count);
+    try grid.ensureCapacity(config.ent_count, null);
+    
 
     var prng = getPrng(init.io);
     var frames: std.ArrayList(FrameMeteric) = .empty;
@@ -90,27 +100,30 @@ pub fn main(init: std.process.Init) !void {
             try writer.flush();
         }
 
-        try generateEnts(allocator, &ents, &prng, config);
-
-        try grid.insertMAL(ents);
+        try generateCircles(allocator, &circles, &prng, config, 0);
+        try generateRects(allocator, &rects, &prng, config, @intCast(circles.len));
+        try generatePoints(allocator, &points, &prng, config, @intCast(circles.len + rects.len));
 
         const start_query = Clock.Timestamp.now(init.io, .awake);
 
-        if (config.naive) try naiveCollisions(allocator, ents.items(.pos), ents.items(.shape_data), ents.items(.id))
-        else {
-            try grid.setCellSize();
-            try grid.update();
+        if (config.naive) {
+            try naiveCollisions(allocator, &circles, &rects, &points);
+        } else {
+            try grid.insertCircles(circles.items(.id), circles.items(.x), circles.items(.y), circles.items(.r));
+            try grid.insertRects(rects.items(.id), rects.items(.x), rects.items(.y), rects.items(.w), rects.items(.h));
+            try grid.insertPoints(points.items(.id), points.items(.x), points.items(.y));
+            try grid.updateCellSize(null);
+            _ = try grid.update();
         }
 
-        const end_query = start_query.durationTo
-            (Clock.Timestamp.now(init.io, .awake));
+        const end_query = start_query.durationTo(Clock.Timestamp.now(init.io, .awake));
 
         var frame = FrameMeteric{
-            .frame = i, 
+            .frame = i,
             .frame_time = end_query.raw.toMilliseconds(),
         };
         try frame.setMedianDistance(
-            allocator, &prng, ents.items(.pos), ents.items(.id)
+            allocator, &prng, circles.items(.x), circles.items(.y), circles.items(.id)
         );
         try frames.append(allocator, frame); 
 
@@ -123,40 +136,46 @@ pub fn main(init: std.process.Init) !void {
     try writer.flush();
 }
 
-fn generateEnts(allocator: std.mem.Allocator, ents: *std.MultiArrayList(Entity), pnrg: *std.Random.DefaultPrng, config: Config) !void {
-    const rand = pnrg.random();
-    ents.clearRetainingCapacity();
+fn generateCircles(allocator: std.mem.Allocator, list: *std.MultiArrayList(CircleEnt), prng: *std.Random.DefaultPrng, config: Config, id_offset: u32) !void {
+    const rand = prng.random();
+    list.clearRetainingCapacity();
+    if (config.shape == .Rect) return;
+    const count = if (config.shape == .All) config.ent_count / 3 else config.ent_count;
+    for (0..count) |i| {
+        try list.append(allocator, .{
+            .id = id_offset + @as(u32, @intCast(i)),
+            .x  = rand.float(f32) * config.world_w,
+            .y  = rand.float(f32) * config.world_h,
+            .r  = rand.float(f32) * (config.max_r - config.min_r) + config.min_r,
+        });
+    }
+}
 
-    for(0..config.ent_count) |i| {
-        const pos = blk: {
-            const x = rand.float(f32) * config.world_w;
-            const y = rand.float(f32) * config.world_h;
-            break :blk Vector2{.x = x, .y = y};
-        };
-        const shape_data: ShapeData = blk: {
-            var shape: @TypeOf(config.shape) = config.shape;
-            if(shape == .All) {
-                switch(rand.intRangeAtMost(usize, 0, 1)) {
-                    0 => shape = .Circle,
-                    1 => shape = .Rect,
-                    else => unreachable,
-                }
-            }
-            switch(shape) {
-                .Rect => {
-                    const w = rand.float(f32) * (config.max_wh - config.min_wh) + config.min_wh;
-                    const h = rand.float(f32) * (config.max_wh - config.min_wh) + config.min_wh;
-                    break :blk ShapeData{.Rect = .{.x = w, .y = h}};
-                },
-                .Circle => break :blk ShapeData{ .Circle = (rand.float(f32) * (config.max_r - config.min_r) + config.min_r )},
-                else => unreachable,
-            }
-            unreachable;
-        };
-        try ents.append(allocator, .{
-            .pos = pos,
-            .shape_data = shape_data,
-            .id = @intCast(i),
+fn generateRects(allocator: std.mem.Allocator, list: *std.MultiArrayList(RectEnt), prng: *std.Random.DefaultPrng, config: Config, id_offset: u32) !void {
+    const rand = prng.random();
+    list.clearRetainingCapacity();
+    if (config.shape == .Circle) return;
+    const count = if (config.shape == .All) config.ent_count / 3 else config.ent_count;
+    for (0..count) |i| {
+        try list.append(allocator, .{
+            .id = id_offset + @as(u32, @intCast(i)),
+            .x  = rand.float(f32) * config.world_w,
+            .y  = rand.float(f32) * config.world_h,
+            .w  = rand.float(f32) * (config.max_wh - config.min_wh) + config.min_wh,
+            .h  = rand.float(f32) * (config.max_wh - config.min_wh) + config.min_wh,
+        });
+    }
+}
+
+fn generatePoints(allocator: std.mem.Allocator, list: *std.MultiArrayList(PointEnt), prng: *std.Random.DefaultPrng, config: Config, id_offset: u32) !void {
+    const rand = prng.random();
+    list.clearRetainingCapacity();
+    const count = if (config.shape == .All) config.ent_count / 3 else 0;
+    for (0..count) |i| {
+        try list.append(allocator, .{
+            .id = id_offset + @as(u32, @intCast(i)),
+            .x  = rand.float(f32) * config.world_w,
+            .y  = rand.float(f32) * config.world_h,
         });
     }
 }
@@ -237,17 +256,40 @@ fn convertArg(comptime T: type, arg: []const u8, startsWith: []const u8) !?T {
     return null;
 } 
 
-fn naiveCollisions(allocator: std.mem.Allocator, positions: []Vector2, shape_data: []ShapeData, ids: []u32) !void {
+const AnyEnt = struct { id: u32, x: f32, y: f32, shape: ShapeData };
+
+fn naiveCollisions(
+    allocator: std.mem.Allocator,
+    circles: *std.MultiArrayList(CircleEnt),
+    rects:   *std.MultiArrayList(RectEnt),
+    points:  *std.MultiArrayList(PointEnt),
+) !void {
+    var ents: std.ArrayList(AnyEnt) = .empty;
+    defer ents.deinit(allocator);
+
+    for (0..circles.len) |i| {
+        const s = circles.get(i);
+        try ents.append(allocator, .{ .id = s.id, .x = s.x, .y = s.y, .shape = .{ .Circle = s.r } });
+    }
+    for (0..rects.len) |i| {
+        const s = rects.get(i);
+        try ents.append(allocator, .{ .id = s.id, .x = s.x, .y = s.y, .shape = .{ .Rect = .{ .x = s.w, .y = s.h } } });
+    }
+    for (0..points.len) |i| {
+        const s = points.get(i);
+        try ents.append(allocator, .{ .id = s.id, .x = s.x, .y = s.y, .shape = .Point });
+    }
+
     var results: std.ArrayList(CollisionPair) = .empty;
     defer results.deinit(allocator);
 
     const CD = CollisionDetection;
-    for (0..ids.len) |i| {
-        for (i + 1..ids.len) |j| {
-            const a = ids[i];
-            const b = ids[j];
-            if (CD.checkColliding(positions[@intCast(a)], shape_data[@intCast(a)], positions[@intCast(b)], shape_data[@intCast(b)])) {
-                try results.append(allocator, .{ .a = a, .b = b });
+    for (0..ents.items.len) |i| {
+        for (i + 1..ents.items.len) |j| {
+            const a = ents.items[i];
+            const b = ents.items[j];
+            if (CD.checkColliding(a.x, a.y, a.shape, b.x, b.y, b.shape)) {
+                try results.append(allocator, .{ .a = a.id, .b = b.id });
             }
         }
     }
@@ -261,10 +303,10 @@ const FrameMeteric = struct {
         self: *FrameMeteric,
         allocator: std.mem.Allocator,
         prng: *std.Random.DefaultPrng,
-        positions: []Vector2,
-        ids: []u32
-    )
-    !void {
+        xs: []f32,
+        ys: []f32,
+        ids: []u32,
+    ) !void {
         const sample_size: usize = 1000;
         const rand = prng.random();
 
@@ -272,14 +314,12 @@ const FrameMeteric = struct {
         defer dists.deinit(allocator);
 
         for(0..sample_size) |_| {
-                const id_a = ids[rand.intRangeAtMost(usize, 0, ids.len - 1)];
-                const id_b = ids[rand.intRangeAtMost(usize, 0, ids.len - 1)];
-                if(id_a >= id_b) continue;
-                const pos_a = positions[@intCast(id_a)];
-                const pos_b = positions[@intCast(id_b)];
+                const ia = rand.intRangeAtMost(usize, 0, ids.len - 1);
+                const ib = rand.intRangeAtMost(usize, 0, ids.len - 1);
+                if(ia >= ib) continue;
 
-                const dx = pos_a.x - pos_b.x;
-                const dy = pos_a.y - pos_b.y;
+                const dx = xs[ia] - xs[ib];
+                const dy = ys[ia] - ys[ib];
                 const dist: f32 = @sqrt(dx * dx + dy * dy);
                 try dists.append(allocator, dist);
         }

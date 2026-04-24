@@ -54,11 +54,11 @@ pub fn Worker(comptime setup: Setup) type {
 
                 const queue = &self.grid.impl.work_queue;
                 while(
-                    queue.getNextWorkItem(self.grid)
+                    queue.getNextWorkItem()
                     catch @panic("Mutex Cancled Error in WorkerQueue.zig\n")
                 ) |item| 
 
-                    self.grid.impl.findCollisions(item, self.query_buf, &self.col_list);
+                    self.grid.impl.findCollisions(self.grid, item, self.query_buf, &self.col_list);
                     self.done_semaphore.post(self.io);
             }
         }

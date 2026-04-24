@@ -13,13 +13,15 @@ pub fn build(b: *std.Build) void {
         .name = "ZigGridLib",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
-            .target = target, .optimize = optimize, .imports = &.{
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
                 .{ .name = "ZigGridLib", .module = mod },
             },
         }),
     });
 
-    //b.installArtifact(exe);
+    b.installArtifact(exe);
 
     const run_step = b.step("run", "Run the app");
     //
@@ -31,21 +33,6 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| {
         run_cmd.addArgs(args);
     }
-
-    const storage_exe = b.addExecutable(.{
-        .name = "storage_exe",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/EntStorage.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "storage_exe", .module = mod },
-            },
-        }),
-    });
-
-    b.installArtifact(storage_exe);
-
     const mod_tests = b.addTest(.{
         .root_module = mod,
     });
@@ -53,8 +40,29 @@ pub fn build(b: *std.Build) void {
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,
     });
+
     const run_exe_tests = b.addRunArtifact(exe_tests);
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+
+    const touchtips_exe = b.addExecutable(.{
+        .name = "touchtips",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/touchtips.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "ZigGridLib", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(touchtips_exe);
+
+    const touchtips_run = b.addRunArtifact(touchtips_exe);
+    touchtips_run.step.dependOn(b.getInstallStep());
+    if (b.args) |args| touchtips_run.addArgs(args);
+
+    const touchtips_step = b.step("touchtips", "Run touchtips");
+    touchtips_step.dependOn(&touchtips_run.step);
 }

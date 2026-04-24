@@ -67,8 +67,7 @@ return struct {
 
         width: f32, // Width of world 
         height: f32, // Height of world
-        cell_size: f32 = 1, // Size of each cell.  Recommend it be 1.2-2x the size of largest entity
-        cell_size_multiplier: f32 = 2.0, // Multiplier applied to the largest entity size when computing cell size via setCellSize.  Recommend 1.2-2.0
+        cell_size_multiplier: f32 = 2.0, // Multiplier applied to the largest entity size when computing cell size via updateCellSize.  Recommend 1.2-2.0
 
         // If null, thread count is set automatically to cpu core count.  multi_threaded variable still must be set to true
         thread_count: ?usize = null, 
@@ -129,7 +128,7 @@ return struct {
             return buf[0..len];
         }
 
-        fn getCellPos(self: @This(), x: f32, y: f32) !CellData {
+        pub fn getCellPos(self: @This(), x: f32, y: f32) !CellData {
             const row: i32 = @intFromFloat(@floor(y / self.cell_size));
             const col: i32 = @intFromFloat(@floor(x / self.cell_size));
 
@@ -147,64 +146,47 @@ return struct {
 
         pub fn findCollisions(
             self: *@This(),
+            grid: anytype,
             work_item: WorkItem,
             query_buf: []u32,
             col_list: *std.ArrayList(CollisionPair),
         ) void {
             switch (work_item.kernel) {
-                .cc => {
-                    self.findCollision(.Circle, .Circle, work_item, col_list, query_buf);
-                },
-                .rr => {
-                    self.findCollision(.Rect, .Rect, work_item, col_list, query_buf);
-                },
-                .pp => {
-                    self.findCollision(.Point, .Point, work_item, col_list, query_buf);
-                },
-                .cr => {
-                    if(self.circle_storage.ent_count < self.rect_storage.ent_count)
-                        self.findCollision(.Circle, .Rect, work_item, col_list, query_buf)
-                    else
-                        self.findCollision(.Rect, .Circle, work_item, col_list, query_buf);
-                },
-                .cp => {
-                    if(self.circle_storage.ent_count < self.point_storage.ent_count)
-                        self.findCollision(.Circle, .Point, work_item, col_list, query_buf)
-                    else
-                        self.findCollision(.Point, .Circle, work_item, col_list, query_buf);
-                },
-                .rp => {
-                    if(self.rect_storage.ent_count < self.point_storage.ent_count)
-                        self.findCollision(.Rect, .Point, work_item, col_list, query_buf)
-                    else
-                        self.findCollision(.Point, .Rect, work_item, col_list, query_buf);
-                },
+                .cc => self.findCollision(.Circle, .Circle, grid, work_item, col_list, query_buf),
+                .rr => self.findCollision(.Rect, .Rect, grid, work_item, col_list, query_buf),
+                .pp => self.findCollision(.Point, .Point, grid, work_item, col_list, query_buf),
+                .cr => self.findCollision(.Circle, .Rect, grid, work_item, col_list, query_buf),
+                .rc => self.findCollision(.Rect, .Circle, grid, work_item, col_list, query_buf),
+                .cp => self.findCollision(.Circle, .Point, grid, work_item, col_list, query_buf),
+                .pc => self.findCollision(.Point, .Circle, grid, work_item, col_list, query_buf),
+                .rp => self.findCollision(.Rect, .Point, grid, work_item, col_list, query_buf),
+                .pr => self.findCollision(.Point, .Rect, grid, work_item, col_list, query_buf),
             }
         }
 
-        fn findCollision(self: *@This(), comptime outer_shape: ShapeType, comptime inner_shape: ShapeType, work_item: WorkItem,
+        fn findCollision(self: *@This(), comptime outer_shape: ShapeType, comptime inner_shape: ShapeType, grid: anytype, work_item: WorkItem,
                             col_list: *std.ArrayList(CollisionPair), buf: []u32) void {
 
             const cd = CollisionDetection(Vec2);
-            const outer_storage = switch (outer_shape) {
+            var outer_storage = switch (outer_shape) {
                     .Circle => self.circle_storage,
                     .Rect => self.rect_storage,
                     .Point => self.point_storage,
             };
 
-            const inner_storage = switch (inner_shape) {
+            var inner_storage = switch (inner_shape) {
                     .Circle => self.circle_storage,
                     .Rect => self.rect_storage,
                     .Point => self.point_storage,
             };
 
-            for(work_item.indicies) |idx_a_u32| {
+            for(outer_storage.indices[work_item.start..work_item.end]) |idx_a_u32| {
                 const idx_a: usize = @intCast(idx_a_u32);
                 const x_a = outer_storage.xs[idx_a];
                 const y_a = outer_storage.ys[idx_a];
                 const id_a = outer_storage.ids[idx_a];
 
-                const nearby = inner_storage.query(x_a, y_a, buf) catch continue;
+                const nearby = inner_storage.query(grid, x_a, y_a, buf) catch continue;
                 for(nearby) |idx_b_u32| {
                     const idx_b: usize = @intCast(idx_b_u32);
                     if (outer_shape == inner_shape and idx_a >= idx_b) continue;
@@ -270,14 +252,11 @@ return struct {
     };
 
     impl: Impl,
-    cell_size_multiplier: f32, // Multiplier applied to the largest entity size when computing cell size via setCellSize.  Recommend 1.2-2.0
+    cell_size_multiplier: f32, // Multiplier applied to the largest entity size when computing cell size via updateCellSize.  Recommend 1.2-2.0
     results: std.ArrayList(CollisionPair) = .empty, // Where collisions are kept after update is called
 
     /// Create a new instance of SpacialGrid
     pub fn init(config: Config) !*Self {
-        const rows: usize = @intFromFloat(@ceil(config.height / config.cell_size));
-        const cols: usize = @intFromFloat(@ceil(config.width / config.cell_size));
-
         const self = try config.allocator.create(Self);
         self.* = Self {
             .cell_size_multiplier = config.cell_size_multiplier,
@@ -286,17 +265,17 @@ return struct {
                 .io = config.io,
                 .width = config.width,
                 .height = config.height,
-                .rows = rows,
-                .cols = cols,
+                .rows = 0,
+                .cols = 0,
                 .workers = undefined,
                 .multi_threaded = config.multi_threaded,
                 .thread_count = config.thread_count,
             },
         };
 
-        self.impl.circle_storage = .init(config.allocator, rows, cols);
-        self.impl.rect_storage = .init(config.allocator, rows, cols);
-        self.impl.point_storage = .init(config.allocator, rows, cols);
+        self.impl.circle_storage = try .init(config.allocator);
+        self.impl.rect_storage = try .init(config.allocator);
+        self.impl.point_storage = try .init(config.allocator);
 
         self.impl.query_results = try config.allocator.alloc(u32, 0);
         self.impl.query_buf = try config.allocator.alloc(u32, 0);
@@ -338,6 +317,7 @@ return struct {
             allocator.free(self.impl.workers);
         }
 
+        self.impl.work_queue.deinit();
         allocator.free(self.impl.query_results);
         self.impl.col_list.deinit(allocator);
         self.results.deinit(self.impl.allocator);
@@ -369,7 +349,9 @@ return struct {
     }
 
     pub fn reset(self: *Self) void {
-        @memset(self.impl.counts, 0); 
+        self.impl.circle_storage.reset();
+        self.impl.rect_storage.reset();
+        self.impl.point_storage.reset();
         self.impl.has_updated = false;
         self.impl.ent_count = 0;
     }
@@ -419,6 +401,158 @@ return struct {
         }
     }
 
+    /// Get entities from cell of and neighboring cells of position
+    pub fn query(self: *Self, x: f32, y: f32) ![]u32 {
+        var queried_indices = try QueryIndices.init(self, x, y);
+        defer queried_indices.deinit();
+
+        const qr = &self.impl.query_results;
+        qr.* = try self.impl.allocator.realloc(qr.*, queried_indices.total_count);
+        const buf = qr.*;
+
+        var pos: usize = 0;
+        for (queried_indices.c_indices) |idx| {
+            buf[pos] = self.impl.circle_storage.ids[@intCast(idx)];
+            pos += 1;
+        }
+        for (queried_indices.r_indices) |idx| {
+            buf[pos] = self.impl.rect_storage.ids[@intCast(idx)];
+            pos += 1;
+        }
+        for (queried_indices.p_indices) |idx| {
+            buf[pos] = self.impl.point_storage.ids[@intCast(idx)];
+            pos += 1;
+        }
+
+        return buf;
+    }
+
+    pub fn queryAndDetect(self: *Self, x: f32, y: f32, shape_data: Shape) !*std.ArrayList(CollisionPair) {
+        const cd = CollisionDetection(Vec2);
+        var queried_indices = try QueryIndices.init(self, x, y); 
+        defer queried_indices.deinit();
+
+        for(queried_indices.c_indices) |idx_u32| {
+            const i: usize = @intCast(idx_u32);
+            const x2 = self.impl.circle_storage.xs[i];
+            const y2 = self.impl.circle_storage.ys[i];
+            const r = self.impl.circle_storage.shape_data.radii[i];
+
+            cd.checkColliding(x, y, shape_data, x2, y2, .{ .Circle = r });
+        }
+
+        for(queried_indices.r_indices) |idx_u32| {
+            const i: usize = @intCast(idx_u32);
+            const x2 = self.impl.rect_storage.xs[i];
+            const y2 = self.impl.rect_storage.ys[i];
+            const w = self.impl.rect_storage.shape_data.widths[i];
+            const h = self.impl.rect_storage.shape_data.widths[i];
+
+            cd.checkColliding(x, y, shape_data, x2, y2, .{ .Rect = .{.x = w, .y = h} });
+        }
+
+        for(queried_indices.p_indices) |idx_u32| {
+            const i: usize = @intCast(idx_u32);
+            const x2 = self.impl.point_storage.xs[i];
+            const y2 = self.impl.point_storage.ys[i];
+
+            cd.checkColliding(x, y, shape_data, x2, y2, .Point);
+        }
+    }
+
+    /// Main collision detection loop
+    pub fn update(self: *Self) !*std.ArrayList(CollisionPair) {
+        const workers = self.impl.workers;
+
+        // Insert entities into the grid 
+        self.results.clearRetainingCapacity();
+        try self.build();
+
+        // If not multi_threaded, just call findCollisions, else run workers
+        if(!self.impl.multi_threaded) {
+            while(try self.impl.work_queue.getNextWorkItem()) |item| {
+                self.impl.findCollisions(self, item, self.impl.query_buf, &self.impl.col_list);
+            }
+            self.impl.has_updated = true;
+            return &self.results;
+        }
+
+        // Have workers look for and save collisions 
+        self.impl.work_queue.reset();
+        for(workers) |*w| {
+            w.col_list.clearRetainingCapacity();
+            w.work_semaphore.post(self.impl.io);
+        }
+
+        // Once workers are finished, add their collisions to the grid's results
+        for(workers) |*w| {
+            w.done_semaphore.wait(self.impl.io) catch continue; 
+            try self.results.appendSlice(self.impl.allocator, w.col_list.items);
+        }
+
+        self.impl.has_updated = true;
+        return &self.results;
+    }
+
+    /// Reallocate buffers to accommodate new entity count.  Leave null to reallocate space for all 
+    /// shapes
+    pub fn ensureCapacity(self: *Self, capacity: usize, shape: ?ShapeType) !void {
+        if(shape) |s| switch(s) {
+            .Circle => try self.impl.circle_storage.ensureCapacity(capacity),
+            .Rect => try self.impl.rect_storage.ensureCapacity(capacity),
+            .Point => try self.impl.point_storage.ensureCapacity(capacity),
+        } else {
+            try self.impl.circle_storage.ensureCapacity(capacity);
+            try self.impl.rect_storage.ensureCapacity(capacity);
+            try self.impl.point_storage.ensureCapacity(capacity);
+        }
+
+        const new_cap: usize = @max(
+            self.impl.circle_storage.ent_count,
+            self.impl.rect_storage.ent_count,
+            self.impl.point_storage.ent_count,
+        );
+
+        self.impl.allocator.free(self.impl.query_buf);
+        if(self.impl.multi_threaded) {
+            for(self.impl.workers) |*w| w.allocator.free(w.query_buf);
+        }
+
+        self.impl.ent_capacity = @intCast(new_cap);
+        self.impl.query_buf = try self.impl.allocator.alloc(u32, new_cap);
+
+        if(self.impl.multi_threaded) {
+            for(self.impl.workers) |*w| w.query_buf = try w.allocator.alloc(u32, new_cap);
+        }
+    }
+    
+    /// Set the size of the SpacialGrid's cell size to the size of the largest entity 
+    /// multipied by SpacialGrid.cell_size_multiplier.
+    /// Must be called before SpacialGrid.update and must be called whenever the maximum size 
+    /// for an entity changes.   
+    pub fn updateCellSize(self: *Self, cell_size_mult: ?f32) !void {
+        if(cell_size_mult) |int| { 
+            if(int < 1) @panic("cell_size_mult must be greater than or equal to 1\n");
+            self.cell_size_multiplier = int; 
+        }
+
+        var cell_size: f32 = @max(
+            self.impl.circle_storage.getLargestSize(),
+            self.impl.rect_storage.getLargestSize(),
+        ) * self.cell_size_multiplier;
+        if(cell_size == 0) cell_size = self.cell_size_multiplier; 
+        
+        self.impl.cell_size = cell_size;
+        const rows: usize = @intFromFloat(@ceil(self.impl.height / self.impl.cell_size));
+        const cols: usize = @intFromFloat(@ceil(self.impl.width / self.impl.cell_size));
+
+        self.impl.rows = rows;        
+        self.impl.cols = cols;
+        try self.impl.circle_storage.setCounts(rows, cols);
+        try self.impl.rect_storage.setCounts(rows, cols);
+        try self.impl.point_storage.setCounts(rows, cols);
+    }
+
     const QueryIndices = struct {
         allocator: std.mem.Allocator,
         c_buf: []u32,
@@ -454,137 +588,5 @@ return struct {
         }
     };
 
-    /// Get entities from cell of and neighboring cells of position
-    pub fn query(self: *Self, x: f32, y: f32) ![]u32 {
-        var ents = try QueryIndices.init(self, x, y);
-        defer ents.deinit();
-
-        const qr = &self.impl.query_results;
-        qr.* = try self.impl.allocator.realloc(qr.*, ents.total_count);
-        const buf = qr.*;
-
-        var pos: usize = 0;
-        for (ents.c_indices) |idx| {
-            buf[pos] = self.impl.circle_storage.ids[@intCast(idx)];
-            pos += 1;
-        }
-        for (ents.r_indices) |idx| {
-            buf[pos] = self.impl.rect_storage.ids[@intCast(idx)];
-            pos += 1;
-        }
-        for (ents.p_indices) |idx| {
-            buf[pos] = self.impl.point_storage.ids[@intCast(idx)];
-            pos += 1;
-        }
-
-        return buf;
-    }
-
-    pub fn queryAndDetect(self: *Self, x: f32, y: f32, width: ?f32, height: ?f32, r: ?f32) !*std.ArrayList(CollisionPair){
-        try self.query(x, y);
-
-
-    }
-
-    /// Main collision detection loop
-    pub fn update(self: *Self) !*std.ArrayList(CollisionPair) {
-        const workers = self.impl.workers;
-
-        // Insert entities into the grid 
-        self.results.clearRetainingCapacity();
-        self.build();
-
-        // If not multi_threaded, just call findCollisions, else run workers
-        if(!self.impl.multi_threaded) {
-            for(self.impl.work_queue.getNextWorkItem()) |item| {
-                try self.impl.findCollisions(item, self.impl.query_buf, self.impl.col_list);
-            }
-            self.impl.has_updated = true;
-            return &self.results;
-        }
-
-        // Have workers look for and save collisions 
-        self.impl.work_queue.reset();
-        for(workers) |*w| {
-            w.col_list.clearRetainingCapacity();
-            w.work_semaphore.post(self.impl.io);
-        }
-
-        // Once workers are finished, add their collisions to the grid's results
-        for(workers) |*w| {
-            w.done_semaphore.wait(self.impl.io) catch continue; 
-            try self.results.appendSlice(self.impl.allocator, w.col_list.items);
-        }
-
-        self.impl.has_updated = true;
-        return &self.results;
-    }
-
-    /// Reallocate buffers to accommodate new entity count.  Leave null to reallocate space for all 
-    /// shapes
-    pub fn ensureCapacity(self: *Self, capacity: usize, shape: ?ShapeType) !void {
-        if(shape) |s| switch(s) {
-            .Circle => self.impl.circle_storage.ensureCapacity(capacity),
-            .Rect => self.impl.rect_storage.ensureCapacity(capacity),
-            .Point => self.impl.point_storage.ensureCapacity(capacity),
-        } else {
-            try self.impl.circle_storage.ensureCapacity(capacity);
-            try self.impl.rect_storage.ensureCapacity(capacity);
-            try self.impl.point_storage.ensureCapacity(capacity);
-        }
-
-        const new_cap: usize = @max(
-            self.impl.circle_storage.ensurecapacity,
-            self.impl.rect_storage.ensurecapacity,
-            self.impl.point_storage.ensurecapacity,
-        );
-
-        self.impl.allocator.free(self.impl.query_buf);
-        if(self.impl.multi_threaded) {
-            for(self.impl.workers) |*w| w.allocator.free(w.query_buf);
-        }
-
-        self.impl.ent_capacity = @intCast(new_cap);
-        self.impl.query_buf = try self.impl.allocator.alloc(u32, new_cap);
-
-        if(self.impl.multi_threaded) {
-            for(self.impl.workers) |*w| w.query_buf = try w.allocator.alloc(u32, new_cap);
-        }
-    }
-    
-    /// Set the size of the SpacialGrid's cell size to the size of the largest entity 
-    /// multipied by SpacialGrid.cell_size_multiplier.
-    /// Must be called before SpacialGrid.update and must be called whenever the maximum size 
-    /// for an entity changes.   
-    pub fn setCellSize(self: *Self) !void {
-        const cell_size: f32 = blk: {
-            var largest: f32 = 0.0;
-            for(self.impl.shape_data) |shape| {
-                const size = switch(shape) {
-                    .Circle => |r| r * 2 * self.cell_size_multiplier,
-                    .Rect => |dim| @max(dim.x, dim.y) * self.cell_size_multiplier,
-                    .Point => 0,
-                };
-
-                if(size > largest) largest = size;
-            }
-            if(largest == 0) largest = 1;
-            break :blk largest;
-        };
-
-        self.impl.cell_size = cell_size;
-        self.impl.rows = @intFromFloat(@ceil(self.impl.height / self.impl.cell_size));
-        self.impl.cols = @intFromFloat(@ceil(self.impl.width / self.impl.cell_size));
-        self.impl.allocator.free(self.impl.counts);
-        self.impl.counts = try self.impl.allocator.alloc(u32, self.impl.rows * self.impl.cols);
-        @memset(self.impl.counts, 0);
-    }
 };
 }
-
-pub fn getPrng(io: std.Io) std.Random.DefaultPrng {
-    var seed: u64 = undefined; 
-    io.random(std.mem.asBytes(&seed));
-    return .init(seed);
-}
-
