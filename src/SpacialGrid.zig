@@ -27,9 +27,10 @@ pub fn CollisionData(comptime Vec2: type) type {
 }
 
 /// The struct that is returned when two entities collide
-pub const CollisionPair = struct {
+pub const CollisionPair = packed struct {
     a: u32,
     b: u32,
+    _pad: u5 = 0,
 };
 
 const CellData = struct{row: usize, col: usize, idx: usize}; 
