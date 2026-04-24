@@ -362,7 +362,7 @@ return struct {
         self.impl.rect_storage.build(self);
         self.impl.point_storage.build(self);
 
-        if(self.impl.multi_threaded) try self.generateWorkQueue();
+        try self.generateWorkQueue();
     }
 
     fn generateWorkQueue(self: *Self) !void {
