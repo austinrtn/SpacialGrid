@@ -42,10 +42,11 @@ pub const WorkQueue = struct {
         try self.work.append(self.allocator, work); 
     }
 
-    pub fn getNextWorkItem(self: *WorkQueue) !?WorkItem{
-        try self.mu.lock(self.io);
-        defer self.mu.unlock(self.io);
-
+    pub fn getNextWorkItem(self: *WorkQueue, m_threaded: bool) !?WorkItem{
+        if(m_threaded) {
+            try self.mu.lock(self.io);
+            defer self.mu.unlock(self.io);
+        }
         if(self.index >= self.work.items.len) return null; 
 
         defer self.index +=1;

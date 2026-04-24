@@ -470,7 +470,7 @@ return struct {
 
         // If not multi_threaded, just call findCollisions, else run workers
         if(!self.impl.multi_threaded) {
-            while(try self.impl.work_queue.getNextWorkItem()) |item| {
+            while(try self.impl.work_queue.getNextWorkItem(false)) |item| {
                 self.impl.findCollisions(self, item, self.impl.query_buf, &self.results);
             }
             self.impl.has_updated = true;

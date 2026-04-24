@@ -61,9 +61,10 @@ pub fn main(init: std.process.Init) !void {
     try circles.ensureTotalCapacity(allocator, config.ent_count);
     try rects.ensureTotalCapacity(allocator, config.ent_count);
     try points.ensureTotalCapacity(allocator, config.ent_count);
-    try grid.ensureCapacity(config.ent_count, null);
+    try grid.ensureCapacity(config.ent_count, .Circle);
+    try grid.ensureCapacity(config.ent_count, .Rect);
+    try grid.ensureCapacity(config.ent_count, .Point);
     
-
     var prng = getPrng(init.io);
     var frames: std.ArrayList(FrameMeteric) = .empty;
     defer frames.deinit(allocator);

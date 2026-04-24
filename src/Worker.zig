@@ -54,7 +54,7 @@ pub fn Worker(comptime setup: Setup) type {
 
                 const queue = &self.grid.impl.work_queue;
                 while(
-                    queue.getNextWorkItem()
+                    queue.getNextWorkItem(true)
                     catch @panic("Mutex Cancled Error in WorkerQueue.zig\n")
                 ) |item| 
 
