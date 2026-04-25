@@ -385,7 +385,7 @@ return struct {
     /// Get entities from cell of and neighboring cells of position.
     /// Range of ents discovered is determined by cell size
     pub fn queryEntsInArea(self: *Self, x: f32, y: f32) ![]u32 {
-        var queried_indices = try QueryIndices.init(self, x, y);
+        var queried_indices = try QueryIndices.init(self.*, x, y);
         defer queried_indices.deinit();
 
         const qr = &self.impl.query_results;
@@ -411,11 +411,11 @@ return struct {
 
     // Find collisions from one point.  the 'a' field in the collision pair is 
     // the id of the queried entity
-    pub fn query(self: Self, x: f32, y: f32, id: u32, shape_data: Shape) !*std.ArrayList(CollisionPair) {
+    pub fn query(self: *Self, x: f32, y: f32, id: u32, shape_data: Shape) !*std.ArrayList(CollisionPair) {
         const cd = CollisionDetection(Vec2);
         self.impl.col_list.clearRetainingCapacity();
 
-        var queried_indices = try QueryIndices.init(self, x, y); 
+        var queried_indices = try QueryIndices.init(self.*, x, y); 
         defer queried_indices.deinit();
 
         for(queried_indices.c_indices) |idx_u32| {
