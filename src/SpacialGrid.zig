@@ -415,7 +415,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
             var queried_indices = try QueryIndices.init(self, x, y);
             defer queried_indices.deinit();
             
-            var qr = &self.impl.query_results;
+            const qr = &self.impl.query_results;
             qr.* = try self.impl.allocator.realloc(qr.*, queried_indices.total_count);
 
             var pos: usize = 0;
