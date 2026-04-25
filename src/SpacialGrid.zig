@@ -252,34 +252,39 @@ return struct {
     };
 
     const Insert = struct {
-        pub fn circles(_: @This(), self: *Self, ids: []const u32, xs: []const f32, ys: []const f32, radii: []const f32) !void {
-            if(self.impl.has_updated) {
-                self.reset();
+        grid: *Self,
+
+        pub fn circles(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32, radii: []const f32) !void {
+            const grid = self.grid;
+            if(grid.impl.has_updated) {
+                grid.reset();
             }
             
-            if(ids.len > self.impl.ent_capacity) try self.ensureCapacity(ids.len * 2, .Circle);
+            if(ids.len > grid.impl.ent_capacity) try grid.ensureCapacity(ids.len * 2, .Circle);
 
-            try self.impl.circle_storage.insert(ids, xs, ys, .{.radii = radii});
+            try grid.impl.circle_storage.insert(ids, xs, ys, .{.radii = radii});
         }
 
-        pub fn rects(_: @This(), self: *Self, ids: []const u32, xs: []const f32, ys: []const f32, widths: []const f32, heights: []const f32) !void {
-            if(self.impl.has_updated) {
-                self.reset();
+        pub fn rects(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32, widths: []const f32, heights: []const f32) !void {
+            const grid = self.grid;
+            if(grid.impl.has_updated) {
+                grid.reset();
             }
 
-            if(ids.len > self.impl.ent_capacity) try self.ensureCapacity(ids.len * 2, .Rect);
+            if(ids.len > grid.impl.ent_capacity) try grid.ensureCapacity(ids.len * 2, .Rect);
 
-            try self.impl.rect_storage.insert(ids, xs, ys, .{.widths = widths, .heights = heights});
+            try grid.impl.rect_storage.insert(ids, xs, ys, .{.widths = widths, .heights = heights});
         }
 
-        pub fn points(_: @This(), self: *Self, ids: []const u32, xs: []const f32, ys: []const f32) !void {
-            if(self.impl.has_updated) {
-                self.reset();
+        pub fn points(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32) !void {
+            const grid = self.grid;
+            if(grid.impl.has_updated) {
+                grid.reset();
             }
 
-            if(ids.len > self.impl.ent_capacity) try self.ensureCapacity(ids.len * 2, .Point);
+            if(ids.len > grid.impl.ent_capacity) try grid.ensureCapacity(ids.len * 2, .Point);
 
-            try self.impl.point_storage.insert(ids, xs, ys, {});
+            try grid.impl.point_storage.insert(ids, xs, ys, {});
         }
     };
 
@@ -358,8 +363,7 @@ return struct {
     }
 
     pub fn insert(self: *Self) Insert {
-        _ = self;
-        return .{};
+        return .{ .grid = self };
     }
 
     pub fn reset(self: *Self) void {
