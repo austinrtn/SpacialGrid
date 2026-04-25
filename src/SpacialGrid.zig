@@ -454,7 +454,7 @@ return struct {
             }
         }
 
-        return self.impl.col_list;
+        return &self.impl.col_list;
     }
 
     /// Main collision detection loop
