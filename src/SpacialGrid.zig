@@ -379,7 +379,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
 
         /// Get entities from cell of and neighboring cells of position.
         /// Range of ents discovered is determined by cell size
-        pub fn queryEntsInArea(self: *Self, x: f32, y: f32) ![]u32 {
+        pub fn queryInArea(self: *Self, x: f32, y: f32) ![]u32 {
             try self.ensureBuilt();
 
             var queried_indices = try QueryIndices.init(self, x, y);
@@ -403,7 +403,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                 pos += 1;
             }
 
-            return buf;
+            return buf[0..pos];
         }
 
         // Find collisions from one point.  the 'a' field in the collision pair is
