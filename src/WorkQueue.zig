@@ -46,12 +46,19 @@ pub const WorkQueue = struct {
         if(m_threaded) {
             try self.mu.lock(self.io);
             defer self.mu.unlock(self.io);
+            if(self.index >= self.work.items.len) return null; 
+
+            const items = self.work.items[self.index];
+            self.index += 1;
+
+            return items;
+        } else {
+            if(self.index >= self.work.items.len) return null; 
+
+            const items = self.work.items[self.index];
+            self.index += 1;
+
+            return items;
         }
-        if(self.index >= self.work.items.len) return null; 
-
-        const items = self.work.items[self.index];
-        self.index += 1;
-
-        return items;
     }
 };
