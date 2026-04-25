@@ -251,43 +251,6 @@ return struct {
         }
     };
 
-    const Insert = struct {
-        grid: *Self,
-
-        pub fn circles(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32, radii: []const f32) !void {
-            const grid = self.grid;
-            if(grid.impl.has_updated) {
-                grid.reset();
-            }
-            
-            if(ids.len > grid.impl.ent_capacity) try grid.ensureCapacity(ids.len * 2, .Circle);
-
-            try grid.impl.circle_storage.insert(ids, xs, ys, .{.radii = radii});
-        }
-
-        pub fn rects(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32, widths: []const f32, heights: []const f32) !void {
-            const grid = self.grid;
-            if(grid.impl.has_updated) {
-                grid.reset();
-            }
-
-            if(ids.len > grid.impl.ent_capacity) try grid.ensureCapacity(ids.len * 2, .Rect);
-
-            try grid.impl.rect_storage.insert(ids, xs, ys, .{.widths = widths, .heights = heights});
-        }
-
-        pub fn points(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32) !void {
-            const grid = self.grid;
-            if(grid.impl.has_updated) {
-                grid.reset();
-            }
-
-            if(ids.len > grid.impl.ent_capacity) try grid.ensureCapacity(ids.len * 2, .Point);
-
-            try grid.impl.point_storage.insert(ids, xs, ys, {});
-        }
-    };
-
     impl: Impl,
     cell_size_multiplier: f32, // Multiplier applied to the largest entity size when computing cell size via updateCellSize.  Recommend 1.2-2.0
     results: std.ArrayList(CollisionPair) = .empty, // Where collisions are kept after update is called
@@ -604,6 +567,44 @@ return struct {
             self.allocator.free(self.p_buf);
         }
     };
+
+    const Insert = struct {
+        grid: *Self,
+
+        pub fn circles(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32, radii: []const f32) !void {
+            const grid = self.grid;
+            if(grid.impl.has_updated) {
+                grid.reset();
+            }
+            
+            if(ids.len > grid.impl.ent_capacity) try grid.ensureCapacity(ids.len * 2, .Circle);
+
+            try grid.impl.circle_storage.insert(ids, xs, ys, .{.radii = radii});
+        }
+
+        pub fn rects(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32, widths: []const f32, heights: []const f32) !void {
+            const grid = self.grid;
+            if(grid.impl.has_updated) {
+                grid.reset();
+            }
+
+            if(ids.len > grid.impl.ent_capacity) try grid.ensureCapacity(ids.len * 2, .Rect);
+
+            try grid.impl.rect_storage.insert(ids, xs, ys, .{.widths = widths, .heights = heights});
+        }
+
+        pub fn points(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32) !void {
+            const grid = self.grid;
+            if(grid.impl.has_updated) {
+                grid.reset();
+            }
+
+            if(ids.len > grid.impl.ent_capacity) try grid.ensureCapacity(ids.len * 2, .Point);
+
+            try grid.impl.point_storage.insert(ids, xs, ys, {});
+        }
+    };
+
 
 };
 }
