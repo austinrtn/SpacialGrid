@@ -330,7 +330,7 @@ return struct {
             self.reset();
         }
         
-        if(ids.len > self.impl.ent_capacity) try self.ensureCapacity(ids.len * 2);
+        if(ids.len > self.impl.ent_capacity) try self.ensureCapacity(ids.len * 2, .Circle);
 
         try self.impl.circle_storage.insert(ids, xs, ys, .{.radii = radii});
     }
@@ -340,7 +340,7 @@ return struct {
             self.reset();
         }
 
-        if(ids.len > self.impl.ent_capacity) try self.ensureCapacity(ids.len * 2);
+        if(ids.len > self.impl.ent_capacity) try self.ensureCapacity(ids.len * 2, .Rectangle);
 
         try self.impl.rect_storage.insert(ids, xs, ys, .{.widths = widths, .heights = heights});
     }
@@ -350,7 +350,7 @@ return struct {
             self.reset();
         }
 
-        if(ids.len > self.impl.ent_capacity) try self.ensureCapacity(ids.len * 2);
+        if(ids.len > self.impl.ent_capacity) try self.ensureCapacity(ids.len * 2, .Point);
 
         try self.impl.point_storage.insert(ids, xs, ys, {});
     }
