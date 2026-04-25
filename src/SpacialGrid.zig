@@ -592,6 +592,10 @@ pub fn SpacialGrid(comptime setup: Setup) type {
         const Insert = struct {
             grid: *Self,
 
+            // pub fn singleCircle(self: @This(), id: u32, x: f32, y: f32, r: f32) void {
+            //
+            // }
+            // 
             pub fn circles(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32, radii: []const f32) !void {
                 const grid = self.grid;
                 if (grid.impl.has_updated) {

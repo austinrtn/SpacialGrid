@@ -31,15 +31,22 @@ pub fn EntStorage(comptime shape_type: ShapeType) type {
             var self: Self = .{
                 .allocator = allocator,
             };
-            defer self.inited = true;
 
-            try self.ensureCapacity(0);
-            try self.setCounts(0, 0);
+            self.counts = try allocator.alloc(u32, 0);
+            self.indices = try allocator.alloc(u32, 0);
+            self.ids = try allocator.alloc(u32, 0);
+            self.xs = try allocator.alloc(f32, 0);
+            self.ys = try allocator.alloc(f32, 0);
 
+            if (ShapeDataType != void) {
+                inline for (std.meta.fields(ShapeDataType)) |field| {
+                    @field(self.shape_data, field.name) = try allocator.alloc(f32, 0);
+                }
+            }
             return self;
         }
 
-        pub fn freeSlices(self: *Self) void {
+        pub fn deinit(self: *Self) void {
             const allocator = self.allocator;
             allocator.free(self.indices);
             allocator.free(self.ids);
@@ -51,30 +58,27 @@ pub fn EntStorage(comptime shape_type: ShapeType) type {
                     allocator.free(@constCast(@field(self.shape_data, field.name)));
                 }
             }
-        }
 
-        pub fn deinit(self: *Self) void {
-            self.freeSlices();
-            self.allocator.free(self.counts);
+            allocator.free(self.counts);
         }
 
         pub fn reset(self: *Self) void {
             @memset(self.counts, 0);
+            self.ent_count = 0;
         }
 
         pub fn ensureCapacity(self: *Self, new_capacity: usize) !void {
             const allocator = self.allocator;
             self.capacity = new_capacity;
-            if (self.inited) self.freeSlices();
 
-            self.indices = try allocator.alloc(u32, new_capacity);
-            self.ids = try allocator.alloc(u32, new_capacity);
-            self.xs = try allocator.alloc(f32, new_capacity);
-            self.ys = try allocator.alloc(f32, new_capacity);
+            self.indices = try allocator.realloc(u32, new_capacity);
+            self.ids = try allocator.realloc(u32, new_capacity);
+            self.xs = try allocator.realloc(f32, new_capacity);
+            self.ys = try allocator.realloc(f32, new_capacity);
 
             if (ShapeDataType != void) {
                 inline for (std.meta.fields(ShapeDataType)) |field| {
-                    @field(self.shape_data, field.name) = try allocator.alloc(f32, new_capacity);
+                    @field(self.shape_data, field.name) = try allocator.realloc(f32, new_capacity);
                 }
             }
         }
@@ -85,20 +89,22 @@ pub fn EntStorage(comptime shape_type: ShapeType) type {
         }
 
         pub fn insert(self: *Self, ids: []const u32, xs: []const f32, ys: []const f32, shape_data: ShapeDataType) !void {
-            if (ids.len > self.capacity) try self.ensureCapacity(ids.len * 2);
+            if (self.ent_count + ids.len > self.capacity) try self.ensureCapacity((self.ent_count + ids.len) * 2);
+            
+            const old_count = self.ent_count;
+            const ent_count = self.ent_count + ids.len;
+            self.ent_count = ent_count;
 
-            @memcpy(self.ids[0..ids.len], ids);
-            @memcpy(self.xs[0..ids.len], xs);
-            @memcpy(self.ys[0..ids.len], ys);
+            @memcpy(self.ids[old_count..ent_count], ids);
+            @memcpy(self.xs[old_count..ent_count], xs);
+            @memcpy(self.ys[old_count..ent_count], ys);
 
             if (ShapeDataType != void) {
                 inline for (std.meta.fields(ShapeDataType)) |field| {
                     const new_data = @field(shape_data, field.name);
-                    @memcpy(@constCast(@field(self.shape_data, field.name))[0..new_data.len], new_data);
+                    @memcpy(@constCast(@field(self.shape_data, field.name))[old_count..ent_count], new_data);
                 }
             }
-
-            self.ent_count = ids.len;
         }
 
         pub fn build(self: *Self, grid: anytype) void {
