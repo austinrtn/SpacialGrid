@@ -382,8 +382,9 @@ return struct {
         }
     }
 
-    /// Get entities from cell of and neighboring cells of position
-    pub fn query(self: *Self, x: f32, y: f32) ![]u32 {
+    /// Get entities from cell of and neighboring cells of position.
+    /// Range of ents discovered is determined by cell size
+    pub fn queryEntsInArea(self: *Self, x: f32, y: f32) ![]u32 {
         var queried_indices = try QueryIndices.init(self, x, y);
         defer queried_indices.deinit();
 
@@ -408,8 +409,12 @@ return struct {
         return buf;
     }
 
-    pub fn queryAndDetect(self: *Self, x: f32, y: f32, shape_data: Shape) !*std.ArrayList(CollisionPair) {
+    // Find collisions from one point.  the 'a' field in the collision pair is 
+    // the id of the queried entity
+    pub fn query(self: *Self, x: f32, y: f32, id: u32, shape_data: Shape) !*std.ArrayList(CollisionPair) {
         const cd = CollisionDetection(Vec2);
+        self.impl.col_list.clearRetainingCapacity();
+
         var queried_indices = try QueryIndices.init(self, x, y); 
         defer queried_indices.deinit();
 
@@ -418,8 +423,11 @@ return struct {
             const x2 = self.impl.circle_storage.xs[i];
             const y2 = self.impl.circle_storage.ys[i];
             const r = self.impl.circle_storage.shape_data.radii[i];
+            const id_b = self.impl.circle_storage.ids[i];
 
-            cd.checkColliding(x, y, shape_data, x2, y2, .{ .Circle = r });
+            if(cd.checkColliding(x, y, shape_data, x2, y2, .{ .Circle = r })) {
+                try self.impl.col_list.append(self.impl.allocator, .{.a = id, .b = id_b});
+            }
         }
 
         for(queried_indices.r_indices) |idx_u32| {
@@ -428,16 +436,22 @@ return struct {
             const y2 = self.impl.rect_storage.ys[i];
             const w = self.impl.rect_storage.shape_data.widths[i];
             const h = self.impl.rect_storage.shape_data.widths[i];
+            const id_b = self.impl.rect_storage.ids[i];
 
-            cd.checkColliding(x, y, shape_data, x2, y2, .{ .Rect = .{.x = w, .y = h} });
+            if(cd.checkColliding(x, y, shape_data, x2, y2, .{ .Rect = .{.x = w, .y = h} })) {
+                try self.impl.col_list.append(self.impl.allocator, .{.a = id, .b = id_b});
+            }
         }
 
         for(queried_indices.p_indices) |idx_u32| {
             const i: usize = @intCast(idx_u32);
             const x2 = self.impl.point_storage.xs[i];
             const y2 = self.impl.point_storage.ys[i];
+            const id_b = self.impl.point_storage.ids[i];
 
-            cd.checkColliding(x, y, shape_data, x2, y2, .Point);
+            if(cd.checkColliding(x, y, shape_data, x2, y2, .Point)) {
+                try self.impl.col_list.append(self.impl.allocator, .{.a = id, .b = id_b});
+            }
         }
     }
 
