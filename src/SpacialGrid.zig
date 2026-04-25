@@ -385,7 +385,7 @@ return struct {
     /// Get entities from cell of and neighboring cells of position.
     /// Range of ents discovered is determined by cell size
     pub fn queryEntsInArea(self: *Self, x: f32, y: f32) ![]u32 {
-        var queried_indices = try QueryIndices.init(self.*, x, y);
+        var queried_indices = try QueryIndices.init(self, x, y);
         defer queried_indices.deinit();
 
         const qr = &self.impl.query_results;
@@ -415,7 +415,7 @@ return struct {
         const cd = CollisionDetection(Vec2);
         self.impl.col_list.clearRetainingCapacity();
 
-        var queried_indices = try QueryIndices.init(self.*, x, y); 
+        var queried_indices = try QueryIndices.init(self, x, y); 
         defer queried_indices.deinit();
 
         for(queried_indices.c_indices) |idx_u32| {
@@ -559,7 +559,7 @@ return struct {
         p_indices: []u32, 
         total_count: usize = 0,
 
-        fn init(grid: Self, x: f32, y: f32) !QueryIndices {
+        fn init(grid: *Self, x: f32, y: f32) !QueryIndices {
             const allocator = grid.impl.allocator;
             var self: QueryIndices = undefined; 
             self.allocator = allocator;
