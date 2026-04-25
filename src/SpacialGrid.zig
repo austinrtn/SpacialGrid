@@ -408,14 +408,17 @@ pub fn SpacialGrid(comptime setup: Setup) type {
 
         // Find collisions from one point.  the 'a' field in the collision pair is
         // the id of the queried entity
-        pub fn query(self: *Self, x: f32, y: f32, id: u32, shape_data: Shape) !*std.ArrayList(CollisionPair) {
+        pub fn query(self: *Self, x: f32, y: f32, shape_data: Shape) ![]u32 {
             const cd = CollisionDetection(Vec2);
             try self.ensureBuilt();
-            self.impl.col_list.clearRetainingCapacity();
 
             var queried_indices = try QueryIndices.init(self, x, y);
             defer queried_indices.deinit();
+            
+            var qr = &self.impl.query_results;
+            qr.* = try self.impl.allocator.realloc(qr.*, queried_indices.total_count);
 
+            var pos: usize = 0;
             for (queried_indices.c_indices) |idx_u32| {
                 const i: usize = @intCast(idx_u32);
                 const x2 = self.impl.circle_storage.xs[i];
@@ -424,8 +427,9 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                 const id_b = self.impl.circle_storage.ids[i];
 
                 if (cd.checkColliding(x, y, shape_data, x2, y2, .{ .Circle = r })) {
-                    try self.impl.col_list.append(self.impl.allocator, .{ .a = id, .b = id_b });
-                }
+                    qr[pos] = id_b;
+                    pos += 1;
+                }    
             }
 
             for (queried_indices.r_indices) |idx_u32| {
@@ -437,7 +441,8 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                 const id_b = self.impl.rect_storage.ids[i];
 
                 if (cd.checkColliding(x, y, shape_data, x2, y2, .{ .Rect = .{ .x = w, .y = h } })) {
-                    try self.impl.col_list.append(self.impl.allocator, .{ .a = id, .b = id_b });
+                    qr[pos] = id_b;
+                    pos += 1;
                 }
             }
 
@@ -448,11 +453,12 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                 const id_b = self.impl.point_storage.ids[i];
 
                 if (cd.checkColliding(x, y, shape_data, x2, y2, .Point)) {
-                    try self.impl.col_list.append(self.impl.allocator, .{ .a = id, .b = id_b });
+                    qr[pos] = id_b;
+                    pos += 1;
                 }
             }
 
-            return &self.impl.col_list;
+            return qr;
         }
 
         /// Main collision detection loop
