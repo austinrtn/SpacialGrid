@@ -573,6 +573,7 @@ return struct {
             self.p_indices = try grid.impl.point_storage.query(grid, x, y, self.p_buf);
 
             self.total_count = self.c_indices.len + self.r_indices.len + self.p_indices.len;
+            return self;
         }
 
         fn deinit(self: *QueryIndices) void {
