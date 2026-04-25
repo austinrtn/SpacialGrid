@@ -458,7 +458,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                 }
             }
 
-            return qr.*;
+            return qr.*[0..pos];
         }
 
         /// Main collision detection loop
