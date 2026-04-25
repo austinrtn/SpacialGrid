@@ -427,7 +427,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                 const id_b = self.impl.circle_storage.ids[i];
 
                 if (cd.checkColliding(x, y, shape_data, x2, y2, .{ .Circle = r })) {
-                    qr[pos] = id_b;
+                    qr.*[pos] = id_b;
                     pos += 1;
                 }    
             }
@@ -441,7 +441,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                 const id_b = self.impl.rect_storage.ids[i];
 
                 if (cd.checkColliding(x, y, shape_data, x2, y2, .{ .Rect = .{ .x = w, .y = h } })) {
-                    qr[pos] = id_b;
+                    qr.*[pos] = id_b;
                     pos += 1;
                 }
             }
@@ -453,12 +453,12 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                 const id_b = self.impl.point_storage.ids[i];
 
                 if (cd.checkColliding(x, y, shape_data, x2, y2, .Point)) {
-                    qr[pos] = id_b;
+                    qr.*[pos] = id_b;
                     pos += 1;
                 }
             }
 
-            return qr;
+            return qr.*;
         }
 
         /// Main collision detection loop
