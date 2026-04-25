@@ -33,24 +33,24 @@ const Config = struct {
 };
 
 pub fn main(init: std.process.Init) !void {
-    const allocator = init.gpa;
+    _ = init;
+    // const allocator = init.gpa;
     //
     // var buf: [2056]u8 = undefined;
     // var stdout = std.Io.File.stdout().writer(init.io, &buf);
     // const writer = &stdout.interface;
     //
-    const config = try parseArgs(allocator, init.minimal.args);
-    var grid: *SpacialGrid = try .init(.{
-        .allocator = init.gpa,
-        .width  = config.world_w,
-        .height = config.world_h,
-        .cell_size_multiplier = 1.2,
-        .multi_threaded = true,
-        .thread_count = config.thread_count,
-        .io = init.io,
-    });
-    defer grid.deinit();
-
+    // const config = try parseArgs(allocator, init.minimal.args);
+    // var grid: *SpacialGrid = try .init(.{
+    //     .allocator = init.gpa,
+    //     .width  = config.world_w,
+    //     .height = config.world_h,
+    //     .cell_size_multiplier = 1.2,
+    //     .multi_threaded = true,
+    //     .thread_count = config.thread_count,
+    //     .io = init.io,
+    // });
+    // defer grid.deinit();
     //
     // var circles: std.MultiArrayList(CircleEnt) = .empty;
     // var rects:   std.MultiArrayList(RectEnt)   = .empty;
