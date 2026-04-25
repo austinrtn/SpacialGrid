@@ -49,7 +49,9 @@ pub const WorkQueue = struct {
         }
         if(self.index >= self.work.items.len) return null; 
 
+        const items = self.work.items[self.index];
         self.index += 1;
-        return self.work.items[self.index];
+
+        return items;
     }
 };
