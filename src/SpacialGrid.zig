@@ -251,7 +251,40 @@ return struct {
         }
     };
 
+    const Insert = struct {
+        pub fn insertCircles(self: *Self, ids: []const u32, xs: []const f32, ys: []const f32, radii: []const f32) !void {
+            if(self.impl.has_updated) {
+                self.reset();
+            }
+            
+            if(ids.len > self.impl.ent_capacity) try self.ensureCapacity(ids.len * 2, .Circle);
+
+            try self.impl.circle_storage.insert(ids, xs, ys, .{.radii = radii});
+        }
+
+        pub fn insertRects(self: *Self, ids: []const u32, xs: []const f32, ys: []const f32, widths: []const f32, heights: []const f32) !void {
+            if(self.impl.has_updated) {
+                self.reset();
+            }
+
+            if(ids.len > self.impl.ent_capacity) try self.ensureCapacity(ids.len * 2, .Rect);
+
+            try self.impl.rect_storage.insert(ids, xs, ys, .{.widths = widths, .heights = heights});
+        }
+
+        pub fn insertPoints(self: *Self, ids: []const u32, xs: []const f32, ys: []const f32) !void {
+            if(self.impl.has_updated) {
+                self.reset();
+            }
+
+            if(ids.len > self.impl.ent_capacity) try self.ensureCapacity(ids.len * 2, .Point);
+
+            try self.impl.point_storage.insert(ids, xs, ys, {});
+        }
+    };
+
     impl: Impl,
+    insert: Insert = .{},
     cell_size_multiplier: f32, // Multiplier applied to the largest entity size when computing cell size via updateCellSize.  Recommend 1.2-2.0
     results: std.ArrayList(CollisionPair) = .empty, // Where collisions are kept after update is called
 
@@ -323,36 +356,6 @@ return struct {
         self.impl.col_list.deinit(allocator);
         self.results.deinit(self.impl.allocator);
         allocator.destroy(self);
-    }
-
-    pub fn insertCircles(self: *Self, ids: []const u32, xs: []const f32, ys: []const f32, radii: []const f32) !void {
-        if(self.impl.has_updated) {
-            self.reset();
-        }
-        
-        if(ids.len > self.impl.ent_capacity) try self.ensureCapacity(ids.len * 2, .Circle);
-
-        try self.impl.circle_storage.insert(ids, xs, ys, .{.radii = radii});
-    }
-
-    pub fn insertRects(self: *Self, ids: []const u32, xs: []const f32, ys: []const f32, widths: []const f32, heights: []const f32) !void {
-        if(self.impl.has_updated) {
-            self.reset();
-        }
-
-        if(ids.len > self.impl.ent_capacity) try self.ensureCapacity(ids.len * 2, .Rect);
-
-        try self.impl.rect_storage.insert(ids, xs, ys, .{.widths = widths, .heights = heights});
-    }
-
-    pub fn insertPoints(self: *Self, ids: []const u32, xs: []const f32, ys: []const f32) !void {
-        if(self.impl.has_updated) {
-            self.reset();
-        }
-
-        if(ids.len > self.impl.ent_capacity) try self.ensureCapacity(ids.len * 2, .Point);
-
-        try self.impl.point_storage.insert(ids, xs, ys, {});
     }
 
     pub fn reset(self: *Self) void {

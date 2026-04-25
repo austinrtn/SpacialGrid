@@ -33,108 +33,109 @@ const Config = struct {
 };
 
 pub fn main(init: std.process.Init) !void {
-    const allocator = init.gpa;
-
-    var buf: [2056]u8 = undefined;
-    var stdout = std.Io.File.stdout().writer(init.io, &buf);
-    const writer = &stdout.interface;
-
-    const config = try parseArgs(allocator, init.minimal.args);
-    var grid: *SpacialGrid = try .init(.{
-        .allocator = init.gpa,
-        .width  = config.world_w,
-        .height = config.world_h,
-        .cell_size_multiplier = 1.2,
-        .multi_threaded = true,
-        .thread_count = config.thread_count,
-        .io = init.io,
-    });
-    defer grid.deinit();
-
-    var circles: std.MultiArrayList(CircleEnt) = .empty;
-    var rects:   std.MultiArrayList(RectEnt)   = .empty;
-    var points:  std.MultiArrayList(PointEnt)  = .empty;
-    defer circles.deinit(allocator);
-    defer rects.deinit(allocator);
-    defer points.deinit(allocator);
-
-    try circles.ensureTotalCapacity(allocator, config.ent_count);
-    try rects.ensureTotalCapacity(allocator, config.ent_count);
-    try points.ensureTotalCapacity(allocator, config.ent_count);
-    try grid.ensureCapacity(config.ent_count, .Circle);
-    try grid.ensureCapacity(config.ent_count, .Rect);
-    try grid.ensureCapacity(config.ent_count, .Point);
-    
-    var prng = getPrng(init.io);
-    var frames: std.ArrayList(FrameMeteric) = .empty;
-    defer frames.deinit(allocator);
-
-    try writer.writeAll("Starting sim...\n");
-    try writer.flush();
-
-    var profiler = struct {
-        collision: std.ArrayList(i128) = .empty,
-        query: std.ArrayList(i128) = .empty,
-        insert: std.ArrayList(i128) = .empty,
-        cell_max: std.ArrayList(usize) = .empty,
-        hits: usize = 0,
-
-        fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
-            self.collision.deinit(alloc);
-            self.query.deinit(alloc);
-            self.insert.deinit(alloc);
-            self.cell_max.deinit(alloc);
-        }
-    }{};
-    defer profiler.deinit(allocator);
-
-    const start = Clock.Timestamp.now(init.io, .awake);
-    var i: usize = 0;
-    // UPDATE LOOP
-    while(true) : (i += 1){
-        if(config.update_stdout and i > 0) {
-            const last_frame = frames.items[i - 1];
-            const elapsed = start.durationTo(Clock.Timestamp.now(init.io, .awake));
-            try writer.print("Frame: {} | FrameTime: {} | Elapsed: {}\r", 
-                .{ last_frame.frame, last_frame.frame_time, elapsed.raw.toSeconds()}
-            );
-            try writer.flush();
-        }
-
-        try generateCircles(allocator, &circles, &prng, config, 0);
-        try generateRects(allocator, &rects, &prng, config, @intCast(circles.len));
-        try generatePoints(allocator, &points, &prng, config, @intCast(circles.len + rects.len));
-
-        const start_query = Clock.Timestamp.now(init.io, .awake);
-
-        if (config.naive) {
-            try naiveCollisions(allocator, &circles, &rects, &points);
-        } else {
-            try grid.insertCircles(circles.items(.id), circles.items(.x), circles.items(.y), circles.items(.r));
-            try grid.insertRects(rects.items(.id), rects.items(.x), rects.items(.y), rects.items(.w), rects.items(.h));
-            try grid.insertPoints(points.items(.id), points.items(.x), points.items(.y));
-            try grid.updateCellSize(null);
-            _ = try grid.update();
-        }
-
-        const end_query = start_query.durationTo(Clock.Timestamp.now(init.io, .awake));
-
-        var frame = FrameMeteric{
-            .frame = i,
-            .frame_time = end_query.raw.toMilliseconds(),
-        };
-        try frame.setMedianDistance(
-            allocator, &prng, circles.items(.x), circles.items(.y), circles.items(.id)
-        );
-        try frames.append(allocator, frame); 
-
-        const elapsed = start.durationTo(Clock.Timestamp.now(init.io, .awake));
-
-        if(elapsed.raw.toSeconds() >= config.timeout) break;
-    }
-
-    try printStats(writer, init.io, config, frames.items, &profiler);
-    try writer.flush();
+    _ = init;
+    // const allocator = init.gpa;
+    //
+    // var buf: [2056]u8 = undefined;
+    // var stdout = std.Io.File.stdout().writer(init.io, &buf);
+    // const writer = &stdout.interface;
+    //
+    // const config = try parseArgs(allocator, init.minimal.args);
+    // var grid: *SpacialGrid = try .init(.{
+    //     .allocator = init.gpa,
+    //     .width  = config.world_w,
+    //     .height = config.world_h,
+    //     .cell_size_multiplier = 1.2,
+    //     .multi_threaded = true,
+    //     .thread_count = config.thread_count,
+    //     .io = init.io,
+    // });
+    // defer grid.deinit();
+    //
+    // var circles: std.MultiArrayList(CircleEnt) = .empty;
+    // var rects:   std.MultiArrayList(RectEnt)   = .empty;
+    // var points:  std.MultiArrayList(PointEnt)  = .empty;
+    // defer circles.deinit(allocator);
+    // defer rects.deinit(allocator);
+    // defer points.deinit(allocator);
+    //
+    // try circles.ensureTotalCapacity(allocator, config.ent_count);
+    // try rects.ensureTotalCapacity(allocator, config.ent_count);
+    // try points.ensureTotalCapacity(allocator, config.ent_count);
+    // try grid.ensureCapacity(config.ent_count, .Circle);
+    // try grid.ensureCapacity(config.ent_count, .Rect);
+    // try grid.ensureCapacity(config.ent_count, .Point);
+    // 
+    // var prng = getPrng(init.io);
+    // var frames: std.ArrayList(FrameMeteric) = .empty;
+    // defer frames.deinit(allocator);
+    //
+    // try writer.writeAll("Starting sim...\n");
+    // try writer.flush();
+    //
+    // var profiler = struct {
+    //     collision: std.ArrayList(i128) = .empty,
+    //     query: std.ArrayList(i128) = .empty,
+    //     insert: std.ArrayList(i128) = .empty,
+    //     cell_max: std.ArrayList(usize) = .empty,
+    //     hits: usize = 0,
+    //
+    //     fn deinit(self: *@This(), alloc: std.mem.Allocator) void {
+    //         self.collision.deinit(alloc);
+    //         self.query.deinit(alloc);
+    //         self.insert.deinit(alloc);
+    //         self.cell_max.deinit(alloc);
+    //     }
+    // }{};
+    // defer profiler.deinit(allocator);
+    //
+    // const start = Clock.Timestamp.now(init.io, .awake);
+    // var i: usize = 0;
+    // // UPDATE LOOP
+    // while(true) : (i += 1){
+    //     if(config.update_stdout and i > 0) {
+    //         const last_frame = frames.items[i - 1];
+    //         const elapsed = start.durationTo(Clock.Timestamp.now(init.io, .awake));
+    //         try writer.print("Frame: {} | FrameTime: {} | Elapsed: {}\r", 
+    //             .{ last_frame.frame, last_frame.frame_time, elapsed.raw.toSeconds()}
+    //         );
+    //         try writer.flush();
+    //     }
+    //
+    //     try generateCircles(allocator, &circles, &prng, config, 0);
+    //     try generateRects(allocator, &rects, &prng, config, @intCast(circles.len));
+    //     try generatePoints(allocator, &points, &prng, config, @intCast(circles.len + rects.len));
+    //
+    //     const start_query = Clock.Timestamp.now(init.io, .awake);
+    //
+    //     if (config.naive) {
+    //         try naiveCollisions(allocator, &circles, &rects, &points);
+    //     } else {
+    //         try grid.insertCircles(circles.items(.id), circles.items(.x), circles.items(.y), circles.items(.r));
+    //         try grid.insertRects(rects.items(.id), rects.items(.x), rects.items(.y), rects.items(.w), rects.items(.h));
+    //         try grid.insertPoints(points.items(.id), points.items(.x), points.items(.y));
+    //         try grid.updateCellSize(null);
+    //         _ = try grid.update();
+    //     }
+    //
+    //     const end_query = start_query.durationTo(Clock.Timestamp.now(init.io, .awake));
+    //
+    //     var frame = FrameMeteric{
+    //         .frame = i,
+    //         .frame_time = end_query.raw.toMilliseconds(),
+    //     };
+    //     try frame.setMedianDistance(
+    //         allocator, &prng, circles.items(.x), circles.items(.y), circles.items(.id)
+    //     );
+    //     try frames.append(allocator, frame); 
+    //
+    //     const elapsed = start.durationTo(Clock.Timestamp.now(init.io, .awake));
+    //
+    //     if(elapsed.raw.toSeconds() >= config.timeout) break;
+    // }
+    //
+    // try printStats(writer, init.io, config, frames.items, &profiler);
+    // try writer.flush();
 }
 
 fn generateCircles(allocator: std.mem.Allocator, list: *std.MultiArrayList(CircleEnt), prng: *std.Random.DefaultPrng, config: Config, id_offset: u32) !void {
