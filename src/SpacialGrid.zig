@@ -453,6 +453,8 @@ return struct {
                 try self.impl.col_list.append(self.impl.allocator, .{.a = id, .b = id_b});
             }
         }
+
+        return self.impl.col_list;
     }
 
     /// Main collision detection loop
