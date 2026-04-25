@@ -411,7 +411,7 @@ return struct {
 
     // Find collisions from one point.  the 'a' field in the collision pair is 
     // the id of the queried entity
-    pub fn query(self: *Self, x: f32, y: f32, id: u32, shape_data: Shape) !*std.ArrayList(CollisionPair) {
+    pub fn query(self: Self, x: f32, y: f32, id: u32, shape_data: Shape) !*std.ArrayList(CollisionPair) {
         const cd = CollisionDetection(Vec2);
         self.impl.col_list.clearRetainingCapacity();
 
