@@ -340,7 +340,7 @@ return struct {
             self.reset();
         }
 
-        if(ids.len > self.impl.ent_capacity) try self.ensureCapacity(ids.len * 2, .Rectangle);
+        if(ids.len > self.impl.ent_capacity) try self.ensureCapacity(ids.len * 2, .Rect);
 
         try self.impl.rect_storage.insert(ids, xs, ys, .{.widths = widths, .heights = heights});
     }
