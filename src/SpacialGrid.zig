@@ -627,9 +627,10 @@ pub fn SpacialGrid(comptime setup: Setup) type {
 
                     inline for (std.meta.fields(@TypeOf(field_map))) |field| {
                         comptime {
-                            const field_name = field.name;
-                            const field_val = @field(field_map, field_name);
-                            const is_circle_field = std.mem.eql(u8, field_name, "ids") or
+                            const field_name = field.name; // Name of field map key / what library uses to insert
+                            const field_val = @field(field_map, field_name); // Field map value that is asigned by user
+                            const is_circle_field = 
+                                std.mem.eql(u8, field_name, "ids") or
                                 std.mem.eql(u8, field_name, "xs") or
                                 std.mem.eql(u8, field_name, "ys") or
                                 std.mem.eql(u8, field_name, "radii");
@@ -640,17 +641,13 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                                     else if (std.mem.eql(u8, field_name, "xs")) data.xs = mal_slice.items(mal_field) 
                                     else if (std.mem.eql(u8, field_name, "ys")) data.ys = mal_slice.items(mal_field) 
                                     else if (std.mem.eql(u8, field_name, "radii")) data.radii = mal_slice.items(mal_field);
-                                }                         
+                                } else {
+                                    @compileError(std.fmt.comptimePrint(
+                                        "MultiArrayList is missing field '{s}' mapped from insertion field '{s}'",
+                                        .{ field_val, field_name },
+                                    ));
+                                }                      
                             }
-                        }
-                    }
-
-                    inline for (std.meta.fields(@TypeOf(data))) |field| {
-                        const field_val = @field(data, field.name);
-                        if (field_val == null) {
-                            const field_map_name = @field(field_map, field.name);
-                            std.log.err("Field {s} missing from MultiArrayList\n", .{field_map_name});
-                            return error.MissingField;
                         }
                     }
 
