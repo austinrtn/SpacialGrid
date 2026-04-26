@@ -5,6 +5,7 @@ const Worker = @import("Worker.zig").Worker;
 const WorkQueueMod = @import("WorkQueue.zig");
 const WorkQueue = WorkQueueMod.WorkQueue;
 const WorkItem = WorkQueueMod.WorkItem;
+const InsertionFieldMap = @import("InsertionFieldMap.zig").InsertionFieldMap;
 
 const Setup = @import("ZigGridLib.zig").Setup;
 const ShapeTypeMod = @import("ShapeType.zig");
@@ -323,7 +324,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
             allocator.destroy(self);
         }
 
-        pub fn insert(self: *Self) Insert {
+        pub fn insert(self: *Self, comptime field_map: InsertionFieldMap) Insert(field_map) {
             return .{ .grid = self };
         }
 
@@ -414,7 +415,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
 
             var queried_indices = try QueryIndices.init(self, x, y);
             defer queried_indices.deinit();
-            
+
             const qr = &self.impl.query_results;
             qr.* = try self.impl.allocator.realloc(qr.*, queried_indices.total_count);
 
@@ -429,7 +430,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                 if (cd.checkColliding(x, y, shape_data, x2, y2, .{ .Circle = r })) {
                     qr.*[pos] = id_b;
                     pos += 1;
-                }    
+                }
             }
 
             for (queried_indices.r_indices) |idx_u32| {
@@ -589,56 +590,110 @@ pub fn SpacialGrid(comptime setup: Setup) type {
             }
         };
 
-        const Insert = struct {
-            grid: *Self,
+        fn Insert(comptime field_map: InsertionFieldMap) type {
+            return struct {
+                grid: *Self,
 
-            pub fn circle(self: @This(), id: u32, x: f32, y: f32, r: f32) !void {
-                try self.circles(&.{id}, &.{x}, &.{y}, &.{r});
-            }
-
-            pub fn rect(self: @This(), id: u32, x: f32, y: f32, w: f32, h: f32) !void {
-                try self.rects(&.{id}, &.{x}, &.{y}, &.{w}, &.{h});
-            }
-
-            pub fn point(self: @This(), id: u32, x: f32, y: f32) !void {
-                try self.points(&.{id}, &.{x}, &.{y});
-            }
-
-            pub fn circles(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32, radii: []const f32) !void {
-                const grid = self.grid;
-                if (grid.impl.has_updated) {
-                    grid.reset();
+                pub fn circle(self: @This(), id: u32, x: f32, y: f32, r: f32) !void {
+                    try self.circles(&.{id}, &.{x}, &.{y}, &.{r});
                 }
 
-                if (ids.len > grid.impl.ent_capacity) try grid.ensureCapacity(ids.len * 2, .Circle);
-
-                try grid.impl.circle_storage.insert(ids, xs, ys, .{ .radii = radii });
-                grid.impl.has_built = false;
-            }
-
-            pub fn rects(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32, widths: []const f32, heights: []const f32) !void {
-                const grid = self.grid;
-                if (grid.impl.has_updated) {
-                    grid.reset();
+                pub fn rect(self: @This(), id: u32, x: f32, y: f32, w: f32, h: f32) !void {
+                    try self.rects(&.{id}, &.{x}, &.{y}, &.{w}, &.{h});
                 }
 
-                if (ids.len > grid.impl.ent_capacity) try grid.ensureCapacity(ids.len * 2, .Rect);
-
-                try grid.impl.rect_storage.insert(ids, xs, ys, .{ .widths = widths, .heights = heights });
-                grid.impl.has_built = false;
-            }
-
-            pub fn points(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32) !void {
-                const grid = self.grid;
-                if (grid.impl.has_updated) {
-                    grid.reset();
+                pub fn point(self: @This(), id: u32, x: f32, y: f32) !void {
+                    try self.points(&.{id}, &.{x}, &.{y});
                 }
 
-                if (ids.len > grid.impl.ent_capacity) try grid.ensureCapacity(ids.len * 2, .Point);
+                pub fn circlesMAL(self: @This(), circles_mal: anytype) !void {
+                    const MalParam = @TypeOf(circles_mal);
+                    const Mal = switch (@typeInfo(MalParam)) {
+                        .pointer => |ptr| ptr.child,
+                        else => MalParam,
+                    };
+                    const FieldEnum = Mal.Field;
+                    const mal_slice = switch (@typeInfo(MalParam)) {
+                        .pointer => circles_mal.*.slice(),
+                        else => circles_mal.slice(),
+                    };
 
-                try grid.impl.point_storage.insert(ids, xs, ys, {});
-                grid.impl.has_built = false;
-            }
-        };
+                    var data = struct {
+                        ids: ?[]const u32 = null,
+                        xs: ?[]const f32 = null,
+                        ys: ?[]const f32 = null,
+                        radii: ?[]const f32 = null,
+                    }{};
+
+                    inline for (std.meta.fields(@TypeOf(field_map))) |field| {
+                        const field_name = field.name;
+                        const field_val = @field(field_map, field_name);
+                        const is_circle_field = std.mem.eql(u8, field_name, "ids") or
+                            std.mem.eql(u8, field_name, "xs") or
+                            std.mem.eql(u8, field_name, "ys") or
+                            std.mem.eql(u8, field_name, "radii");
+
+                        if (!is_circle_field) continue;
+
+                        if (std.meta.stringToEnum(FieldEnum, field_val)) |mal_field| {
+                            if (std.mem.eql(u8, field_name, "ids")) data.ids = mal_slice.items(mal_field) 
+                            else if (std.mem.eql(u8, field_name, "xs")) data.xs = mal_slice.items(mal_field) 
+                            else if (std.mem.eql(u8, field_name, "ys")) data.ys = mal_slice.items(mal_field) 
+                            else if (std.mem.eql(u8, field_name, "radii")) data.radii = mal_slice.items(mal_field);
+                        } else {
+                            std.log.err("Field {s} missing from MultiArrayList\n", .{field_val});
+                            return error.MissingField;
+                        }
+                    }
+
+                    inline for (std.meta.fields(@TypeOf(data))) |field| {
+                        const field_val = @field(data, field.name);
+                        if (field_val == null) {
+                            const field_map_name = @field(field_map, field.name);
+                            std.log.err("Field {s} missing from MultiArrayList\n", .{field_map_name});
+                            return error.MissingField;
+                        }
+                    }
+
+                    try self.circles(data.ids.?, data.xs.?, data.ys.?, data.radii.?);
+                }
+
+                pub fn circles(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32, radii: []const f32) !void {
+                    const grid = self.grid;
+                    if (grid.impl.has_updated) {
+                        grid.reset();
+                    }
+
+                    if (ids.len > grid.impl.ent_capacity) try grid.ensureCapacity(ids.len * 2, .Circle);
+
+                    try grid.impl.circle_storage.insert(ids, xs, ys, .{ .radii = radii });
+                    grid.impl.has_built = false;
+                }
+
+                pub fn rects(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32, widths: []const f32, heights: []const f32) !void {
+                    const grid = self.grid;
+                    if (grid.impl.has_updated) {
+                        grid.reset();
+                    }
+
+                    if (ids.len > grid.impl.ent_capacity) try grid.ensureCapacity(ids.len * 2, .Rect);
+
+                    try grid.impl.rect_storage.insert(ids, xs, ys, .{ .widths = widths, .heights = heights });
+                    grid.impl.has_built = false;
+                }
+
+                pub fn points(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32) !void {
+                    const grid = self.grid;
+                    if (grid.impl.has_updated) {
+                        grid.reset();
+                    }
+
+                    if (ids.len > grid.impl.ent_capacity) try grid.ensureCapacity(ids.len * 2, .Point);
+
+                    try grid.impl.point_storage.insert(ids, xs, ys, {});
+                    grid.impl.has_built = false;
+                }
+            };
+        }
     };
 }
