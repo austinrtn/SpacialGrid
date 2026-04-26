@@ -626,20 +626,22 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                     }{};
 
                     inline for (std.meta.fields(@TypeOf(field_map))) |field| {
-                        const field_name = field.name;
-                        const field_val = @field(field_map, field_name);
-                        const is_circle_field = std.mem.eql(u8, field_name, "ids") or
-                            std.mem.eql(u8, field_name, "xs") or
-                            std.mem.eql(u8, field_name, "ys") or
-                            std.mem.eql(u8, field_name, "radii");
+                        comptime {
+                            const field_name = field.name;
+                            const field_val = @field(field_map, field_name);
+                            const is_circle_field = std.mem.eql(u8, field_name, "ids") or
+                                std.mem.eql(u8, field_name, "xs") or
+                                std.mem.eql(u8, field_name, "ys") or
+                                std.mem.eql(u8, field_name, "radii");
 
-                        if (is_circle_field){
-                            if (std.meta.stringToEnum(FieldEnum, field_val)) |mal_field| {
-                                if (std.mem.eql(u8, field_name, "ids")) data.ids = mal_slice.items(mal_field) 
-                                else if (std.mem.eql(u8, field_name, "xs")) data.xs = mal_slice.items(mal_field) 
-                                else if (std.mem.eql(u8, field_name, "ys")) data.ys = mal_slice.items(mal_field) 
-                                else if (std.mem.eql(u8, field_name, "radii")) data.radii = mal_slice.items(mal_field);
-                            }                         
+                            if (is_circle_field){
+                                if (std.meta.stringToEnum(FieldEnum, field_val)) |mal_field| {
+                                    if (std.mem.eql(u8, field_name, "ids")) data.ids = mal_slice.items(mal_field) 
+                                    else if (std.mem.eql(u8, field_name, "xs")) data.xs = mal_slice.items(mal_field) 
+                                    else if (std.mem.eql(u8, field_name, "ys")) data.ys = mal_slice.items(mal_field) 
+                                    else if (std.mem.eql(u8, field_name, "radii")) data.radii = mal_slice.items(mal_field);
+                                }                         
+                            }
                         }
                     }
 
