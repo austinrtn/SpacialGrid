@@ -600,8 +600,8 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                 try self.rects(&.{id}, &.{x}, &.{y}, &.{w}, &.{h});
             }
 
-            pub fn point(self: @This(), id: u32, x: f32) !void {
-                try self.points(&.{id}, &.{x});
+            pub fn point(self: @This(), id: u32, x: f32, y: f32) !void {
+                try self.points(&.{id}, &.{x}, &.{y});
             }
 
             pub fn circles(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32, radii: []const f32) !void {
