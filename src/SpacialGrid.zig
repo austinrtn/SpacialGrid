@@ -633,16 +633,16 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                             std.mem.eql(u8, field_name, "ys") or
                             std.mem.eql(u8, field_name, "radii");
 
-                        if (!is_circle_field) continue;
-
-                        if (std.meta.stringToEnum(FieldEnum, field_val)) |mal_field| {
-                            if (std.mem.eql(u8, field_name, "ids")) data.ids = mal_slice.items(mal_field) 
-                            else if (std.mem.eql(u8, field_name, "xs")) data.xs = mal_slice.items(mal_field) 
-                            else if (std.mem.eql(u8, field_name, "ys")) data.ys = mal_slice.items(mal_field) 
-                            else if (std.mem.eql(u8, field_name, "radii")) data.radii = mal_slice.items(mal_field);
-                        } else {
-                            std.log.err("Field {s} missing from MultiArrayList\n", .{field_val});
-                            return error.MissingField;
+                        if (is_circle_field){
+                            if (std.meta.stringToEnum(FieldEnum, field_val)) |mal_field| {
+                                if (std.mem.eql(u8, field_name, "ids")) data.ids = mal_slice.items(mal_field) 
+                                else if (std.mem.eql(u8, field_name, "xs")) data.xs = mal_slice.items(mal_field) 
+                                else if (std.mem.eql(u8, field_name, "ys")) data.ys = mal_slice.items(mal_field) 
+                                else if (std.mem.eql(u8, field_name, "radii")) data.radii = mal_slice.items(mal_field);
+                            } else {
+                                std.log.err("Field {s} missing from MultiArrayList\n", .{field_val});
+                                return error.MissingField;
+                            }
                         }
                     }
 
