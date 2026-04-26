@@ -70,15 +70,16 @@ pub fn EntStorage(comptime shape_type: ShapeType) type {
         pub fn ensureCapacity(self: *Self, new_capacity: usize) !void {
             const allocator = self.allocator;
             self.capacity = new_capacity;
-
-            self.indices = try allocator.realloc(u32, new_capacity);
-            self.ids = try allocator.realloc(u32, new_capacity);
-            self.xs = try allocator.realloc(f32, new_capacity);
-            self.ys = try allocator.realloc(f32, new_capacity);
+            
+            self.indices = try allocator.realloc(self.indices, new_capacity);
+            self.ids = try allocator.realloc(self.ids, new_capacity);
+            self.xs = try allocator.realloc(self.xs, new_capacity);
+            self.ys = try allocator.realloc(self.ys, new_capacity);
 
             if (ShapeDataType != void) {
                 inline for (std.meta.fields(ShapeDataType)) |field| {
-                    @field(self.shape_data, field.name) = try allocator.realloc(f32, new_capacity);
+                    const field_data = &@field(self.shape_data, field.name);
+                    field_data.* = try allocator.realloc(field_data.*, new_capacity);
                 }
             }
         }
