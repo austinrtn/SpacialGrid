@@ -618,37 +618,34 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                     };
                     const FieldEnum = comptime Mal.Field;
 
-                    var data = struct {
-                        ids: ?[]const u32 = null,
-                        xs: ?[]const f32 = null,
-                        ys: ?[]const f32 = null,
-                        radii: ?[]const f32 = null,
-                    }{};
+                    var data: struct {
+                        ids: []const u32,
+                        xs: []const f32,
+                        ys: []const f32,
+                        radii: []const f32,
+                    } = undefined;
 
                     inline for (std.meta.fields(@TypeOf(field_map))) |field| {
-                            const field_name = field.name; // Name of field map key / what library uses to insert
-                            const field_val = @field(field_map, field_name); // Field map value that is asigned by user
-                            const is_circle_field = 
-                                std.mem.eql(u8, field_name, "ids") or
-                                std.mem.eql(u8, field_name, "xs") or
-                                std.mem.eql(u8, field_name, "ys") or
-                                std.mem.eql(u8, field_name, "radii");
+                        const field_name = field.name;
+                        const field_val = @field(field_map, field_name);
+                        const is_circle_field =
+                            std.mem.eql(u8, field_name, "ids") or
+                            std.mem.eql(u8, field_name, "xs") or
+                            std.mem.eql(u8, field_name, "ys") or
+                            std.mem.eql(u8, field_name, "radii");
 
-                            if (is_circle_field){
-                                const mal_field = comptime (std.meta.stringToEnum(FieldEnum, field_val) orelse
+                        if (is_circle_field) {
+                            const mal_field = comptime (std.meta.stringToEnum(FieldEnum, field_val) orelse
                                 @compileError(std.fmt.comptimePrint(
                                     "\nMultiArrayList is missing field '{s}' mapped from insertion field '{s}'\n",
                                     .{ field_val, field_name },
                                 )));
 
-                                if (std.mem.eql(u8, field_name, "ids")) data.ids = mal_slice.items(mal_field) 
-                                else if (std.mem.eql(u8, field_name, "xs")) data.xs = mal_slice.items(mal_field) 
-                                else if (std.mem.eql(u8, field_name, "ys")) data.ys = mal_slice.items(mal_field) 
-                                else if (std.mem.eql(u8, field_name, "radii")) data.radii = mal_slice.items(mal_field);
-                            }
+                            @field(data, field_name) = mal_slice.items(mal_field);
                         }
+                    }
 
-                    try self.circles(data.ids.?, data.xs.?, data.ys.?, data.radii.?);
+                    try self.circles(data.ids, data.xs, data.ys, data.radii);
                 }
 
                 pub fn circles(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32, radii: []const f32) !void {
