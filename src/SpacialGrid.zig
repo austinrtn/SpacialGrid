@@ -643,7 +643,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                                     else if (std.mem.eql(u8, field_name, "radii")) data.radii = mal_slice.items(mal_field);
                                 } else {
                                     @compileError(std.fmt.comptimePrint(
-                                        "MultiArrayList is missing field '{s}' mapped from insertion field '{s}'",
+                                        "\nMultiArrayList is missing field '{s}' mapped from insertion field '{s}'\n",
                                         .{ field_val, field_name },
                                     ));
                                 }                      
