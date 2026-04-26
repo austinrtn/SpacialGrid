@@ -612,11 +612,11 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                         .pointer => |ptr| ptr.child,
                         else => MalParam,
                     };
-                    const FieldEnum = Mal.Field;
                     const mal_slice = switch (@typeInfo(MalParam)) {
                         .pointer => circles_mal.*.slice(),
                         else => circles_mal.slice(),
                     };
+                    const FieldEnum = comptime Mal.Field;
 
                     var data = struct {
                         ids: ?[]const u32 = null,
@@ -639,10 +639,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                                 else if (std.mem.eql(u8, field_name, "xs")) data.xs = mal_slice.items(mal_field) 
                                 else if (std.mem.eql(u8, field_name, "ys")) data.ys = mal_slice.items(mal_field) 
                                 else if (std.mem.eql(u8, field_name, "radii")) data.radii = mal_slice.items(mal_field);
-                            } else {
-                                std.log.err("Field {s} missing from MultiArrayList\n", .{field_val});
-                                return error.MissingField;
-                            }
+                            }                         
                         }
                     }
 
