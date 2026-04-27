@@ -625,23 +625,16 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                         radii: []const f32,
                     } = undefined;
 
-                    inline for (.{.ids, .xs, .ys, .radii}) |field_name| {
-                        const field_val = @field(field_map, @tagName(field_name));
-                        const is_circle_field =
-                            std.mem.eql(u8, field_name, "ids") or
-                            std.mem.eql(u8, field_name, "xs") or
-                            std.mem.eql(u8, field_name, "ys") or
-                            std.mem.eql(u8, field_name, "radii");
+                    inline for (.{"ids", "xs", "ys", "radii"}) |field_name| {
+                        const field_val = @field(field_map, field_name);
 
-                        if (is_circle_field) {
-                            const mal_field = comptime (std.meta.stringToEnum(FieldEnum, field_val) orelse
-                                @compileError(std.fmt.comptimePrint(
-                                    "\nMultiArrayList is missing field '{s}' mapped from insertion field '{s}'\n",
-                                    .{ field_val, field_name },
-                                )));
+                        const mal_field = comptime (std.meta.stringToEnum(FieldEnum, field_val) orelse
+                            @compileError(std.fmt.comptimePrint(
+                                "\nMultiArrayList is missing field '{s}' mapped from insertion field '{s}'\n",
+                                .{ field_val, field_name},
+                            )));
 
-                            @field(data, field_name) = mal_slice.items(mal_field);
-                        }
+                        @field(data, field_name) = mal_slice.items(mal_field);
                     }
 
                     try self.circles(data.ids, data.xs, data.ys, data.radii);
