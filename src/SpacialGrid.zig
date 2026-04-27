@@ -607,25 +607,34 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                 }
 
                 pub fn circlesMAL(self: @This(), circles_mal: anytype) !void {
-                    const MalParam = @TypeOf(circles_mal);
+                    const Data = @Struct(
+                        .auto,
+                        null,
+                        &[_][]const u8{"ids", "xs", "ys", "radii"},
+                        &[_]type {[]u32, []f32, []f32, []f32},
+                        &[_]std.builtin.Type.StructField.Attributes{.{}, .{}, .{}, .{}},
+                    );
+
+                    var data: Data = undefined;
+
+                    self.parseMal(&data, circles_mal);
+                    try self.circles(data.ids, data.xs, data.ys, data.radii);
+                }
+
+                fn parseMal(_: @This(), data: anytype, mal: anytype) void {
+                    const MalParam = @TypeOf(mal);
                     const Mal = switch (@typeInfo(MalParam)) {
                         .pointer => |ptr| ptr.child,
                         else => MalParam,
                     };
                     const mal_slice = switch (@typeInfo(MalParam)) {
-                        .pointer => circles_mal.*.slice(),
-                        else => circles_mal.slice(),
+                        .pointer => mal.*.slice(),
+                        else => mal.slice(),
                     };
                     const FieldEnum = comptime Mal.Field;
 
-                    var data: struct {
-                        ids: []const u32,
-                        xs: []const f32,
-                        ys: []const f32,
-                        radii: []const f32,
-                    } = undefined;
-
-                    inline for (.{"ids", "xs", "ys", "radii"}) |field_name| {
+                    inline for (std.meta.fields(@TypeOf(data.*))) |field| {
+                        const field_name = field.name;
                         const field_val = @field(field_map, field_name);
 
                         const mal_field = comptime (std.meta.stringToEnum(FieldEnum, field_val) orelse
@@ -636,8 +645,6 @@ pub fn SpacialGrid(comptime setup: Setup) type {
 
                         @field(data, field_name) = mal_slice.items(mal_field);
                     }
-
-                    try self.circles(data.ids, data.xs, data.ys, data.radii);
                 }
 
                 pub fn circles(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32, radii: []const f32) !void {
