@@ -625,8 +625,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                         radii: []const f32,
                     } = undefined;
 
-                    inline for (.{.ids, .xs, .ys, .radii}) |field| {
-                        const field_name = field.name;
+                    inline for (.{.ids, .xs, .ys, .radii}) |field_name| {
                         const field_val = @field(field_map, field_name);
                         const is_circle_field =
                             std.mem.eql(u8, field_name, "ids") or
