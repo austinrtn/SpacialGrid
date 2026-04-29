@@ -5,7 +5,9 @@ const Worker = @import("Worker.zig").Worker;
 const WorkQueueMod = @import("WorkQueue.zig");
 const WorkQueue = WorkQueueMod.WorkQueue;
 const WorkItem = WorkQueueMod.WorkItem;
-const InsertionFieldMap = @import("InsertionFieldMap.zig").InsertionFieldMap;
+
+const Insert = @import("Insert.zig").Insert;
+const Profiler = @import("Profiler.zig").Profiler;
 
 const Setup = @import("ZigGridLib.zig").Setup;
 const ShapeTypeMod = @import("ShapeType.zig");
@@ -35,6 +37,7 @@ pub const CollisionPair = packed struct {
 
 const CellData = struct { row: usize, col: usize, idx: usize };
 /// Collision detection system
+const PROFILING = true;
 pub fn SpacialGrid(comptime setup: Setup) type {
     const Vec2 = setup.Vector2;
     const Shape = ShapeData(Vec2);
@@ -102,6 +105,8 @@ pub fn SpacialGrid(comptime setup: Setup) type {
             col_list: std.ArrayList(CollisionPair) = .empty,
             has_updated: bool = false,
             has_built: bool = false,
+
+            profiler: Profiler = undefined,
 
             pub fn getCellIndex(self: @This(), row: i32, col: i32) !usize {
                 if (row < 0 or col < 0) return error.OutOfBounds;
@@ -252,6 +257,8 @@ pub fn SpacialGrid(comptime setup: Setup) type {
         };
 
         impl: Impl,
+        insert: Insert(Self) = undefined,
+        profiler: Profiler = undefined,
         cell_size_multiplier: f32, // Multiplier applied to the largest entity size when computing cell size via updateCellSize.  Recommend 1.2-2.0
         results: std.ArrayList(CollisionPair) = .empty, // Where collisions are kept after update is called
 
@@ -273,9 +280,13 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                 },
             };
 
+            self.insert = Insert(Self).init(self);
             self.impl.circle_storage = try .init(config.allocator);
             self.impl.rect_storage = try .init(config.allocator);
             self.impl.point_storage = try .init(config.allocator);
+
+            if(PROFILING) 
+                self.impl.profiler = .init(config.allocator, config.io);
 
             self.impl.query_results = try config.allocator.alloc(u32, 0);
             self.impl.query_buf = try config.allocator.alloc(u32, 0);
@@ -321,11 +332,8 @@ pub fn SpacialGrid(comptime setup: Setup) type {
             allocator.free(self.impl.query_results);
             self.impl.col_list.deinit(allocator);
             self.results.deinit(self.impl.allocator);
+            if(PROFILING) self.impl.profiler.deinit();
             allocator.destroy(self);
-        }
-
-        pub fn insert(self: *Self, comptime field_map: InsertionFieldMap) Insert(field_map) {
-            return .{ .grid = self };
         }
 
         pub fn reset(self: *Self) void {
@@ -464,6 +472,8 @@ pub fn SpacialGrid(comptime setup: Setup) type {
 
         /// Main collision detection loop
         pub fn update(self: *Self) !*std.ArrayList(CollisionPair) {
+            if(PROFILING) self.impl.profiler.items.update.start();
+
             const workers = self.impl.workers;
 
             // Insert entities into the grid
@@ -476,6 +486,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                     self.impl.findCollisions(self, item, self.impl.query_buf, &self.results);
                 }
                 self.impl.has_updated = true;
+                if(PROFILING) try self.impl.profiler.items.update.stop();
                 return &self.results;
             }
 
@@ -492,6 +503,8 @@ pub fn SpacialGrid(comptime setup: Setup) type {
             }
 
             self.impl.has_updated = true;
+
+            if(PROFILING) try self.impl.profiler.items.update.stop();
             return &self.results;
         }
 
@@ -554,6 +567,12 @@ pub fn SpacialGrid(comptime setup: Setup) type {
             try self.impl.point_storage.setCounts(rows, cols);
         }
 
+        pub fn getProfilerResults(self: *Self) ![]const u8 {
+            if(!PROFILING) @compileError("PROFILING must be set to true to call function getProfilerResults!\n");
+            try self.impl.profiler.buildResults();
+            return self.impl.profiler.results.written();
+        }
+
         const QueryIndices = struct {
             allocator: std.mem.Allocator,
             c_buf: []u32,
@@ -589,100 +608,5 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                 self.allocator.free(self.p_buf);
             }
         };
-
-        fn Insert(comptime field_map: InsertionFieldMap) type {
-            return struct {
-                grid: *Self,
-
-                pub fn circle(self: @This(), id: u32, x: f32, y: f32, r: f32) !void {
-                    try self.circles(&.{id}, &.{x}, &.{y}, &.{r});
-                }
-
-                pub fn rect(self: @This(), id: u32, x: f32, y: f32, w: f32, h: f32) !void {
-                    try self.rects(&.{id}, &.{x}, &.{y}, &.{w}, &.{h});
-                }
-
-                pub fn point(self: @This(), id: u32, x: f32, y: f32) !void {
-                    try self.points(&.{id}, &.{x}, &.{y});
-                }
-
-                pub fn circlesMAL(self: @This(), circles_mal: anytype) !void {
-                    const Data = @Struct(
-                        .auto,
-                        null,
-                        &[_][]const u8{"ids", "xs", "ys", "radii"},
-                        &[_]type {[]u32, []f32, []f32, []f32},
-                        &[_]std.builtin.Type.StructField.Attributes{.{}, .{}, .{}, .{}},
-                    );
-
-                    var data: Data = undefined;
-
-                    self.parseMal(&data, circles_mal);
-                    try self.circles(data.ids, data.xs, data.ys, data.radii);
-                }
-
-                fn parseMal(_: @This(), data: anytype, mal: anytype) void {
-                    const MalParam = @TypeOf(mal);
-                    const Mal = switch (@typeInfo(MalParam)) {
-                        .pointer => |ptr| ptr.child,
-                        else => MalParam,
-                    };
-                    const mal_slice = switch (@typeInfo(MalParam)) {
-                        .pointer => mal.*.slice(),
-                        else => mal.slice(),
-                    };
-                    const FieldEnum = comptime Mal.Field;
-
-                    inline for (std.meta.fields(@TypeOf(data.*))) |field| {
-                        const field_name = field.name;
-                        const field_val = @field(field_map, field_name);
-
-                        const mal_field = comptime (std.meta.stringToEnum(FieldEnum, field_val) orelse
-                            @compileError(std.fmt.comptimePrint(
-                                "\nMultiArrayList is missing field '{s}' mapped from insertion field '{s}'\n",
-                                .{ field_val, field_name},
-                            )));
-
-                        @field(data, field_name) = mal_slice.items(mal_field);
-                    }
-                }
-
-                pub fn circles(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32, radii: []const f32) !void {
-                    const grid = self.grid;
-                    if (grid.impl.has_updated) {
-                        grid.reset();
-                    }
-
-                    if (ids.len > grid.impl.ent_capacity) try grid.ensureCapacity(ids.len * 2, .Circle);
-
-                    try grid.impl.circle_storage.insert(ids, xs, ys, .{ .radii = radii });
-                    grid.impl.has_built = false;
-                }
-
-                pub fn rects(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32, widths: []const f32, heights: []const f32) !void {
-                    const grid = self.grid;
-                    if (grid.impl.has_updated) {
-                        grid.reset();
-                    }
-
-                    if (ids.len > grid.impl.ent_capacity) try grid.ensureCapacity(ids.len * 2, .Rect);
-
-                    try grid.impl.rect_storage.insert(ids, xs, ys, .{ .widths = widths, .heights = heights });
-                    grid.impl.has_built = false;
-                }
-
-                pub fn points(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32) !void {
-                    const grid = self.grid;
-                    if (grid.impl.has_updated) {
-                        grid.reset();
-                    }
-
-                    if (ids.len > grid.impl.ent_capacity) try grid.ensureCapacity(ids.len * 2, .Point);
-
-                    try grid.impl.point_storage.insert(ids, xs, ys, {});
-                    grid.impl.has_built = false;
-                }
-            };
-        }
     };
 }

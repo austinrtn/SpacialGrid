@@ -170,10 +170,10 @@ pub fn EntStorage(comptime shape_type: ShapeType) type {
         pub fn getLargestSize(self: *Self) f32 {
             var size: f32 = 0;
             switch (shape_type) {
-                .Circle => for (self.shape_data.radii) |r| {
+                .Circle => for (self.shape_data.radii[0..self.ent_count]) |r| {
                     size = @max(size, r * 2);
                 },
-                .Rect => for (self.shape_data.widths, self.shape_data.heights) |w, h| {
+                .Rect => for (self.shape_data.widths[0..self.ent_count], self.shape_data.heights[0..self.ent_count]) |w, h| {
                     size = @max(size, w, h);
                 },
                 else => unreachable,
