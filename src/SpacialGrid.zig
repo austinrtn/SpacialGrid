@@ -106,7 +106,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
             has_updated: bool = false,
             has_built: bool = false,
 
-            profiler: Profiler = undefined,
+            profiler: *Profiler = undefined,
 
             pub fn getCellIndex(self: @This(), row: i32, col: i32) !usize {
                 if (row < 0 or col < 0) return error.OutOfBounds;
@@ -289,7 +289,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
             self.impl.point_storage = try .init(config.allocator);
 
             if (PROFILING)
-                self.impl.profiler.init(config.allocator, config.io);
+                self.impl.profiler = try .init(config.allocator, config.io);
 
             self.impl.query_results = try config.allocator.alloc(u32, 0);
             self.impl.query_buf = try config.allocator.alloc(u32, 0);
@@ -389,6 +389,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
 
         /// Get entities from cell of and neighboring cells of position.
         /// Range of ents discovered is determined by cell size
+        /// Still needs Testing
         pub fn queryInArea(self: *Self, x: f32, y: f32) ![]u32 {
             try self.ensureBuilt();
 
@@ -473,7 +474,8 @@ pub fn SpacialGrid(comptime setup: Setup) type {
 
         /// Main collision detection loop
         pub fn update(self: *Self) !*std.ArrayList(CollisionPair) {
-            if (PROFILING) self.impl.profiler.items.update.start();
+            const profiler = self.impl.profiler;
+            if (PROFILING) profiler.items.update.start();
 
             const workers = self.impl.workers;
 
@@ -483,11 +485,16 @@ pub fn SpacialGrid(comptime setup: Setup) type {
 
             // If not multi_threaded, just call findCollisions, else run workers
             if (!self.impl.multi_threaded) {
+                if(PROFILING) profiler.items.find_collision.start();
+
                 while (try self.impl.work_queue.getNextWorkItem(false)) |item| {
                     self.impl.findCollisions(self, item, self.impl.query_buf, &self.results);
                 }
+
+                if (PROFILING) try profiler.items.find_collision.stop();
                 self.impl.has_updated = true;
-                if (PROFILING) try self.impl.profiler.items.update.stop();
+
+                if (PROFILING) try profiler.items.update.stop();
                 return &self.results;
             }
 
@@ -498,14 +505,16 @@ pub fn SpacialGrid(comptime setup: Setup) type {
             }
 
             // Once workers are finished, add their collisions to the grid's results
+            if(PROFILING) profiler.items.find_collision.start();
             for (workers) |*w| {
                 w.done_semaphore.wait(self.impl.io) catch continue;
                 try self.results.appendSlice(self.impl.allocator, w.col_list.items);
             }
+            if (PROFILING) try profiler.items.find_collision.stop();
 
             self.impl.has_updated = true;
 
-            if (PROFILING) try self.impl.profiler.items.update.stop();
+            if (PROFILING) try profiler.items.update.stop();
             return &self.results;
         }
 
@@ -569,12 +578,25 @@ pub fn SpacialGrid(comptime setup: Setup) type {
         }
 
         pub fn startProfiler(self: *Self, max_frames: ?usize) void {
-            self.impl.profiler.start(max_frames);
+            self.impl.profiler.start(
+                max_frames,
+                .{
+                    .Circle = self.impl.circle_storage.ent_count,
+                    .Rect = self.impl.rect_storage.ent_count,
+                    .Point = self.impl.point_storage.ent_count,
+                },
+            );
         }
 
         pub fn stopProfiler(self: *Self) void {
             if (!self.impl.profiler.running) @panic("Function SpacialGrid.startProfiler must be called first!\n");
-            self.impl.profiler.stop();
+            self.impl.profiler.stop(
+                .{
+                    .Circle = self.impl.circle_storage.ent_count,
+                    .Rect = self.impl.rect_storage.ent_count,
+                    .Point = self.impl.point_storage.ent_count,
+                },
+            );
         }
 
         pub fn getProfilerResults(self: *Self) ![]const u8 {
