@@ -2,7 +2,7 @@ const std = @import("std");
 const ShapeType = @import("ShapeType.zig").ShapeType;
 const CollisionPair = @import("SpacialGrid.zig").CollisionPair;
 
-pub fn EntStorage(comptime shape_type: ShapeType) type {
+pub fn EntStorage(comptime shape_type: ShapeType, comptime PROFILING: bool) type {
     return struct {
         const Self = @This();
         pub const ShapeDataType = switch (shape_type) {
@@ -16,6 +16,7 @@ pub fn EntStorage(comptime shape_type: ShapeType) type {
 
         shape: ShapeType = shape_type,
         ent_count: usize = 0,
+        active_count: usize = 0,
         capacity: usize = 0,
 
         indices: []u32 = undefined,
@@ -65,12 +66,13 @@ pub fn EntStorage(comptime shape_type: ShapeType) type {
         pub fn reset(self: *Self) void {
             @memset(self.counts, 0);
             self.ent_count = 0;
+            self.active_count = 0;
         }
 
         pub fn ensureCapacity(self: *Self, new_capacity: usize) !void {
             const allocator = self.allocator;
             self.capacity = new_capacity;
-            
+
             self.indices = try allocator.realloc(self.indices, new_capacity);
             self.ids = try allocator.realloc(self.ids, new_capacity);
             self.xs = try allocator.realloc(self.xs, new_capacity);
@@ -91,7 +93,7 @@ pub fn EntStorage(comptime shape_type: ShapeType) type {
 
         pub fn insert(self: *Self, ids: []const u32, xs: []const f32, ys: []const f32, shape_data: ShapeDataType) !void {
             if (self.ent_count + ids.len > self.capacity) try self.ensureCapacity((self.ent_count + ids.len) * 2);
-            
+
             const old_count = self.ent_count;
             const ent_count = self.ent_count + ids.len;
             self.ent_count = ent_count;
@@ -122,6 +124,9 @@ pub fn EntStorage(comptime shape_type: ShapeType) type {
                 self.counts[cell.idx] += 1;
             }
 
+            if (PROFILING)
+                grid.impl.profiler.cell_density.append(shape_type, self.counts) catch {};
+
             // Prefix-sum pass: rewrite counts[i] from "entity count in cell i"
             // to "start offset of cell i in the indices array".
             var total: u32 = 0;
@@ -131,6 +136,7 @@ pub fn EntStorage(comptime shape_type: ShapeType) type {
                 count.* = total;
                 total += placeholder;
             }
+            self.active_count = total;
 
             // Scatter pass: write each entity id into its cell's slot in indices,
             // advancing the cell's write cursor so consecutive ids pack contiguously.

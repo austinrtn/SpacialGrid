@@ -41,7 +41,6 @@ pub fn SpacialGrid(comptime setup: Setup) type {
     const Vec2 = setup.Vector2;
     const PROFILING = setup.Profiling;
     const Shape = ShapeData(Vec2);
-    //const CollisionD = CollisionData(Vec2);
 
     if (!@hasField(Vec2, "x") or !@hasField(Vec2, "y")) {
         @compileError("Vector2 type must contain both fields x and y");
@@ -88,9 +87,9 @@ pub fn SpacialGrid(comptime setup: Setup) type {
             cell_size: f32 = 1.0,
 
             ent_count: u32 = 0,
-            circle_storage: EntStorage(.Circle) = undefined,
-            rect_storage: EntStorage(.Rect) = undefined,
-            point_storage: EntStorage(.Point) = undefined,
+            circle_storage: EntStorage(.Circle, PROFILING) = undefined,
+            rect_storage: EntStorage(.Rect, PROFILING) = undefined,
+            point_storage: EntStorage(.Point, PROFILING) = undefined,
 
             multi_threaded: bool = false,
             thread_count: usize = 1,
@@ -345,14 +344,14 @@ pub fn SpacialGrid(comptime setup: Setup) type {
         }
 
         fn build(self: *Self) !void {
-            if (PROFILING) self.impl.profiler.items.build.start();
+            if (PROFILING) self.impl.profiler.timed_items.build.start();
             self.impl.circle_storage.build(self);
             self.impl.rect_storage.build(self);
             self.impl.point_storage.build(self);
 
             try self.generateWorkQueue();
             self.impl.has_built = true;
-            if (PROFILING) try self.impl.profiler.items.build.stop();
+            if (PROFILING) try self.impl.profiler.timed_items.build.stop();
         }
 
         pub fn ensureBuilt(self: *Self) !void {
@@ -361,9 +360,9 @@ pub fn SpacialGrid(comptime setup: Setup) type {
 
         fn generateWorkQueue(self: *Self) !void {
             self.impl.work_queue.reset();
-            const circle_count = self.impl.circle_storage.ent_count;
-            const rect_count = self.impl.rect_storage.ent_count;
-            const point_count = self.impl.point_storage.ent_count;
+            const circle_count = self.impl.circle_storage.active_count;
+            const rect_count = self.impl.rect_storage.active_count;
+            const point_count = self.impl.point_storage.active_count;
 
             try self.generateKernelItems(.cc, circle_count);
             try self.generateKernelItems(.rr, rect_count);
@@ -475,7 +474,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
         /// Main collision detection loop
         pub fn update(self: *Self) !*std.ArrayList(CollisionPair) {
             const profiler = self.impl.profiler;
-            if (PROFILING) profiler.items.update.start();
+            if (PROFILING) profiler.timed_items.update.start();
 
             const workers = self.impl.workers;
 
@@ -485,16 +484,16 @@ pub fn SpacialGrid(comptime setup: Setup) type {
 
             // If not multi_threaded, just call findCollisions, else run workers
             if (!self.impl.multi_threaded) {
-                if(PROFILING) profiler.items.find_collision.start();
+                if (PROFILING) profiler.timed_items.find_collision.start();
 
                 while (try self.impl.work_queue.getNextWorkItem(false)) |item| {
                     self.impl.findCollisions(self, item, self.impl.query_buf, &self.results);
                 }
 
-                if (PROFILING) try profiler.items.find_collision.stop();
+                if (PROFILING) try profiler.timed_items.find_collision.stop();
                 self.impl.has_updated = true;
 
-                if (PROFILING) try profiler.items.update.stop();
+                if (PROFILING) try profiler.timed_items.update.stop();
                 return &self.results;
             }
 
@@ -505,16 +504,16 @@ pub fn SpacialGrid(comptime setup: Setup) type {
             }
 
             // Once workers are finished, add their collisions to the grid's results
-            if(PROFILING) profiler.items.find_collision.start();
+            if (PROFILING) profiler.timed_items.find_collision.start();
             for (workers) |*w| {
                 w.done_semaphore.wait(self.impl.io) catch continue;
                 try self.results.appendSlice(self.impl.allocator, w.col_list.items);
             }
-            if (PROFILING) try profiler.items.find_collision.stop();
+            if (PROFILING) try profiler.timed_items.find_collision.stop();
 
             self.impl.has_updated = true;
 
-            if (PROFILING) try profiler.items.update.stop();
+            if (PROFILING) try profiler.timed_items.update.stop();
             return &self.results;
         }
 
@@ -578,33 +577,60 @@ pub fn SpacialGrid(comptime setup: Setup) type {
         }
 
         pub fn startProfiler(self: *Self, max_frames: ?usize) void {
-            self.impl.profiler.start(
-                max_frames,
-                .{
-                    .Circle = self.impl.circle_storage.ent_count,
-                    .Rect = self.impl.rect_storage.ent_count,
-                    .Point = self.impl.point_storage.ent_count,
-                },
-            );
+            if (!PROFILING) {
+                std.log.warn("Profiling is disabled for this SpacialGrid setup; startProfiler() request ignored.", .{});
+                return;
+            } else {
+                self.impl.profiler.start(
+                    max_frames,
+                    .{
+                        .Circle = self.impl.circle_storage.ent_count,
+                        .Rect = self.impl.rect_storage.ent_count,
+                        .Point = self.impl.point_storage.ent_count,
+                    },
+                );
+            }
+        }
+
+        pub fn updateProfiler(self: *Self) void {
+            if (!self.impl.profiler.running) {
+                std.log.warn("startProfiler() must be called before updateProfiler(); request ignored.", .{});
+                return;
+            }
+
+            self.impl.profiler.update();
         }
 
         pub fn stopProfiler(self: *Self) void {
-            if (!self.impl.profiler.running) @panic("Function SpacialGrid.startProfiler must be called first!\n");
-            self.impl.profiler.stop(
-                .{
-                    .Circle = self.impl.circle_storage.ent_count,
-                    .Rect = self.impl.rect_storage.ent_count,
-                    .Point = self.impl.point_storage.ent_count,
-                },
-            );
+            const profiler = self.impl.profiler;
+            if (!profiler.running) {
+                std.log.warn("startProfiler() must be called before stopProfiler(); request ignored.\n", .{});
+                return;
+            }
+
+            if (profiler.frames == 0) {
+                std.log.warn("No frames detected.  Likely cause: SpacialGrid.updateProfiler was never called.\n  Call function at the end of each frame.  Not doing so can lead to inaccurate profiling.\n", .{});
+                return;
+            }
+            profiler.stop(.{
+                .Circle = self.impl.circle_storage.ent_count,
+                .Rect = self.impl.rect_storage.ent_count,
+                .Point = self.impl.point_storage.ent_count,
+            });
         }
 
         pub fn getProfilerResults(self: *Self) ![]const u8 {
-            if (!PROFILING) @compileError("PROFILING must be set to true to call function getProfilerResults!\n");
-            if (!self.impl.profiler.finished)
-                @panic("Functions SpacialGrid.startProfiler and SpacialGrid.endProfiler must be called before getting profiler results!\n");
-            try self.impl.profiler.buildResults(self);
-            return self.impl.profiler.results.written();
+            if (!PROFILING) {
+                std.log.warn("Profiling is disabled for this SpacialGrid setup; getProfilerResults() is returning an empty result.", .{});
+                return "";
+            } else {
+                if (!self.impl.profiler.finished) {
+                    std.log.warn("startProfiler() and stopProfiler() must both be called before getProfilerResults(); returning an empty result.", .{});
+                    return "";
+                }
+                try self.impl.profiler.buildResults(self);
+                return self.impl.profiler.results.written();
+            }
         }
 
         const QueryIndices = struct {
