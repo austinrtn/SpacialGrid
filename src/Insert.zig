@@ -18,7 +18,7 @@ pub const InsertionFieldMap = struct {
     radii: []const u8 = "radii",
 };
 
-pub fn Insert(comptime SpacialGrid: type) type {
+pub fn Insert(comptime SpacialGrid: type, comptime PROFILING: bool) type {
     return struct {
         const Self = @This();
         Circle: CircleInsert,
@@ -41,6 +41,7 @@ pub fn Insert(comptime SpacialGrid: type) type {
             }
 
             pub fn many(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32, radii: []const f32) !void {
+                if(PROFILING) self.grid.impl.profiler.items.insert_circles.start();
                 const grid = self.grid;
                 if (grid.impl.has_updated) {
                     grid.reset();
@@ -50,6 +51,8 @@ pub fn Insert(comptime SpacialGrid: type) type {
 
                 try grid.impl.circle_storage.insert(ids, xs, ys, .{ .radii = radii });
                 grid.impl.has_built = false;
+
+                if(PROFILING) try self.grid.impl.profiler.items.insert_circles.stop();
             }
 
             pub fn mal(self: @This(), comptime field_map: InsertionFieldMap, circles_mal: anytype) !void {
@@ -78,6 +81,7 @@ pub fn Insert(comptime SpacialGrid: type) type {
             }
 
             pub fn many(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32, widths: []const f32, heights: []const f32) !void {
+                if(PROFILING) self.grid.impl.profiler.items.insert_rects.start();
                 const grid = self.grid;
                 if (grid.impl.has_updated) {
                     grid.reset();
@@ -87,6 +91,7 @@ pub fn Insert(comptime SpacialGrid: type) type {
 
                 try grid.impl.rect_storage.insert(ids, xs, ys, .{ .widths = widths, .heights = heights });
                 grid.impl.has_built = false;
+                if(PROFILING) try self.grid.impl.profiler.items.insert_rects.stop();
             }
 
             pub fn mal(self: @This(), comptime field_map: InsertionFieldMap, rect_mal: anytype) !void {
@@ -115,6 +120,7 @@ pub fn Insert(comptime SpacialGrid: type) type {
             }
 
             pub fn many(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32) !void {
+                if(PROFILING) self.grid.impl.profiler.items.insert_points.start();
                 const grid = self.grid;
                 if (grid.impl.has_updated) {
                     grid.reset();
@@ -124,6 +130,7 @@ pub fn Insert(comptime SpacialGrid: type) type {
 
                 try grid.impl.point_storage.insert(ids, xs, ys, {});
                 grid.impl.has_built = false;
+                if(PROFILING) try self.grid.impl.profiler.items.insert_points.stop();
             }
 
             pub fn mal(self: @This(), comptime field_map: InsertionFieldMap, point_mal: anytype) !void {

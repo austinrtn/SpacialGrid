@@ -37,9 +37,9 @@ pub const CollisionPair = packed struct {
 
 const CellData = struct { row: usize, col: usize, idx: usize };
 /// Collision detection system
-const PROFILING = true;
 pub fn SpacialGrid(comptime setup: Setup) type {
     const Vec2 = setup.Vector2;
+    const PROFILING = setup.Profiling;
     const Shape = ShapeData(Vec2);
     //const CollisionD = CollisionData(Vec2);
 
@@ -93,7 +93,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
             point_storage: EntStorage(.Point) = undefined,
 
             multi_threaded: bool = false,
-            thread_count: ?usize = null,
+            thread_count: usize = 1,
 
             ent_capacity: u32 = 0,
 
@@ -257,13 +257,17 @@ pub fn SpacialGrid(comptime setup: Setup) type {
         };
 
         impl: Impl,
-        insert: Insert(Self) = undefined,
-        profiler: Profiler = undefined,
+        insert: Insert(Self, PROFILING) = undefined,
         cell_size_multiplier: f32, // Multiplier applied to the largest entity size when computing cell size via updateCellSize.  Recommend 1.2-2.0
         results: std.ArrayList(CollisionPair) = .empty, // Where collisions are kept after update is called
 
         /// Create a new instance of SpacialGrid
         pub fn init(config: Config) !*Self {
+            // Setting the thread count does not enable multi threading by itself
+            if (config.thread_count != null and !config.multi_threaded) {
+                std.log.warn("SpacialGrid.multi_threading must be set to true durring init to enable multi_threading!\n", .{});
+            }
+
             const self = try config.allocator.create(Self);
             self.* = Self{
                 .cell_size_multiplier = config.cell_size_multiplier,
@@ -276,29 +280,24 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                     .cols = 0,
                     .workers = undefined,
                     .multi_threaded = config.multi_threaded,
-                    .thread_count = config.thread_count,
                 },
             };
 
-            self.insert = Insert(Self).init(self);
+            self.insert = Insert(Self, PROFILING).init(self);
             self.impl.circle_storage = try .init(config.allocator);
             self.impl.rect_storage = try .init(config.allocator);
             self.impl.point_storage = try .init(config.allocator);
 
-            if(PROFILING) 
-                self.impl.profiler = .init(config.allocator, config.io);
+            if (PROFILING)
+                self.impl.profiler.init(config.allocator, config.io);
 
             self.impl.query_results = try config.allocator.alloc(u32, 0);
             self.impl.query_buf = try config.allocator.alloc(u32, 0);
 
-            // Setting the thread count does not enable multi threading by itself
-            if (self.impl.thread_count != null and !self.impl.multi_threaded) {
-                std.log.warn("SpacialGrid.multi_threading must be set to true durring init to enable multi_threading!\n", .{});
-            }
-
             // Get number of cpu cores and create that many number of Workers/ threads
             if (config.multi_threaded) {
-                const thread_count = self.impl.thread_count orelse try std.Thread.getCpuCount();
+                const thread_count = config.thread_count orelse try std.Thread.getCpuCount();
+                self.impl.thread_count = thread_count;
                 self.impl.workers = try config.allocator.alloc(Worker(setup), thread_count);
 
                 // Init worker threads.
@@ -332,7 +331,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
             allocator.free(self.impl.query_results);
             self.impl.col_list.deinit(allocator);
             self.results.deinit(self.impl.allocator);
-            if(PROFILING) self.impl.profiler.deinit();
+            if (PROFILING) self.impl.profiler.deinit();
             allocator.destroy(self);
         }
 
@@ -346,12 +345,14 @@ pub fn SpacialGrid(comptime setup: Setup) type {
         }
 
         fn build(self: *Self) !void {
+            if (PROFILING) self.impl.profiler.items.build.start();
             self.impl.circle_storage.build(self);
             self.impl.rect_storage.build(self);
             self.impl.point_storage.build(self);
 
             try self.generateWorkQueue();
             self.impl.has_built = true;
+            if (PROFILING) try self.impl.profiler.items.build.stop();
         }
 
         pub fn ensureBuilt(self: *Self) !void {
@@ -472,7 +473,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
 
         /// Main collision detection loop
         pub fn update(self: *Self) !*std.ArrayList(CollisionPair) {
-            if(PROFILING) self.impl.profiler.items.update.start();
+            if (PROFILING) self.impl.profiler.items.update.start();
 
             const workers = self.impl.workers;
 
@@ -486,7 +487,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                     self.impl.findCollisions(self, item, self.impl.query_buf, &self.results);
                 }
                 self.impl.has_updated = true;
-                if(PROFILING) try self.impl.profiler.items.update.stop();
+                if (PROFILING) try self.impl.profiler.items.update.stop();
                 return &self.results;
             }
 
@@ -504,7 +505,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
 
             self.impl.has_updated = true;
 
-            if(PROFILING) try self.impl.profiler.items.update.stop();
+            if (PROFILING) try self.impl.profiler.items.update.stop();
             return &self.results;
         }
 
@@ -567,9 +568,20 @@ pub fn SpacialGrid(comptime setup: Setup) type {
             try self.impl.point_storage.setCounts(rows, cols);
         }
 
+        pub fn startProfiler(self: *Self, max_frames: ?usize) void {
+            self.impl.profiler.start(max_frames);
+        }
+
+        pub fn stopProfiler(self: *Self) void {
+            if (!self.impl.profiler.running) @panic("Function SpacialGrid.startProfiler must be called first!\n");
+            self.impl.profiler.stop();
+        }
+
         pub fn getProfilerResults(self: *Self) ![]const u8 {
-            if(!PROFILING) @compileError("PROFILING must be set to true to call function getProfilerResults!\n");
-            try self.impl.profiler.buildResults();
+            if (!PROFILING) @compileError("PROFILING must be set to true to call function getProfilerResults!\n");
+            if (!self.impl.profiler.finished)
+                @panic("Functions SpacialGrid.startProfiler and SpacialGrid.endProfiler must be called before getting profiler results!\n");
+            try self.impl.profiler.buildResults(self);
             return self.impl.profiler.results.written();
         }
 

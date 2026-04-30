@@ -7,7 +7,7 @@ const InsertMod = @import("Insert.zig");
 
 const SpacialGridT = SpacialGridMod.SpacialGrid;
 
-pub const Setup = struct { Vector2: type = Vector2 };
+pub const Setup = struct { Vector2: type = Vector2, Profiling: bool = false};
 pub fn ZigGridLib(comptime setup: Setup) type {
     return struct {
         pub const ZigGridLibSetup = Setup;
