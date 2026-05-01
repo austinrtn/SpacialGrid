@@ -17,8 +17,11 @@ pub const Profiler = struct {
     results: std.Io.Writer.Allocating = undefined,
 
     start_time: Timestamp = undefined,
-    end_time: f32 = 0,
-    frames: usize = 0,
+    end_time: f64 = 0,
+    last_time: i96 = undefined,
+
+    time_elapsed: f64 = 0,
+    frames: f64 = 0,
     fps_tracker: Arraylist(f64) = .empty,
 
     shape_count_start: ShapeCounts = undefined,
@@ -66,65 +69,69 @@ pub const Profiler = struct {
         self.allocator.destroy(self);
     }
 
+    pub fn start(self: *Profiler, max_frames: ?usize) void {
+        if (max_frames) |f| ProfileItem.max_samples = f;
+        self.running = true;
+        self.start_time = Timestamp.now(self.io, .awake);
+        self.last_time = self.start_time.raw.nanoseconds;
+    }
+
     pub fn update(self: *Profiler) void {
         if (!self.running) return;
         self.frames += 1;
 
-        const elapsed_seconds: f64 = @as(f64, self.end_time) / 1000.0;
-        const fps: f64 = if (elapsed_seconds == 0) 0 else
-            @as(f64, @floatFromInt(self.frames)) / elapsed_seconds;
+        const elapsed_ts = self.start_time.durationTo(Timestamp.now(self.io, .awake));
 
+        const elapsed_milis: f64 = @floatFromInt(elapsed_ts.raw.toMilliseconds());
+        self.time_elapsed = elapsed_milis / 1000;
+
+        const elapsed_s: f64 = @floatFromInt(elapsed_ts.raw.toSeconds());
+        const fps: f64 = if (elapsed_s == 0) 0 else self.frames / elapsed_s;
         self.fps_tracker.append(self.allocator, fps) catch {};
     }
 
-    pub fn start(self: *Profiler, max_frames: ?usize, shape_count_start: ShapeCounts) void {
-        if (max_frames) |f| ProfileItem.max_samples = f;
-        self.running = true;
-        self.start_time = Timestamp.now(self.io, .awake);
-        self.shape_count_start = shape_count_start;
-    }
-
-    pub fn stop(self: *Profiler, shape_count_end: ShapeCounts) void {
+    pub fn stop(self: *Profiler) void {
         const elapsed_dur = self.start_time.durationTo(
             Timestamp.now(self.io, .awake),
         );
 
-        self.shape_count_end = shape_count_end;
         self.end_time = @floatFromInt(elapsed_dur.raw.toMilliseconds());
         self.running = false;
         self.finished = true;
     }
 
-    pub fn buildResults(self: *Profiler, grid: anytype) !void {
+    pub fn writeResults(self: *Profiler, grid: anytype, clear_screen: bool) !void {
         const out = &self.results.writer;
+        if (clear_screen) try out.writeAll("\x1b[2J \x1b[H");
         const header: []const u8 = "Spacial Grid Profiling";
         try out.print("{s}\n", .{header});
+
         for (0..header.len) |_| try out.writeAll("_");
         try out.writeAll("\n");
 
         try self.writeGridData(grid);
 
-        if (!isShapeCountEql(self.shape_count_start, self.shape_count_end)) {
-            try out.writeAll("Starting Shapes:\n");
-            try self.writeShapeCounts(self.shape_count_start);
-            try out.writeAll("\nEnding Shapes:\n");
-            try self.writeShapeCounts(self.shape_count_end);
-        } else {
-            try out.writeAll("\nShape Count:\n");
-            try self.writeShapeCounts(self.shape_count_end);
-        }
-        try out.writeAll("\n");
+        // if (!isShapeCountEql(self.shape_count_start, self.shape_count_end)) {
+        //     try out.writeAll("Starting Shapes:\n");
+        //     try self.writeShapeCounts(self.shape_count_start);
+        //     try out.writeAll("\nEnding Shapes:\n");
+        //     try self.writeShapeCounts(self.shape_count_end);
+        // } else {
+        //     try out.writeAll("\nShape Count:\n");
+        //     try self.writeShapeCounts(self.shape_count_end);
+        // }
+        // try out.writeAll("\n");
 
-        try self.writeCellData(grid);
-        try out.writeAll("\n");
-        try self.writeTimedItems();
+        // try self.writeCellData(grid);
+        // try out.writeAll("\n");
+        // try self.writeTimedItems();
     }
 
     fn writeGridData(self: *Profiler, grid: anytype) !void {
         const out = &self.results.writer;
-        const elapsed_seconds: f32 = (self.end_time) / 1000.0;
 
-        try out.print("Time Profiled: {d:.2}s\n", .{elapsed_seconds});
+        try out.print("Time Profiled: {d:.2}s\n", .{self.time_elapsed});
+        try out.print("Frame: {d:.0}\n", .{self.frames});
         try out.print("Threads: {}\n", .{grid.impl.thread_count});
     }
 

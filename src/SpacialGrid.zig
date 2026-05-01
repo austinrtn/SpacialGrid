@@ -578,27 +578,22 @@ pub fn SpacialGrid(comptime setup: Setup) type {
 
         pub fn startProfiler(self: *Self, max_frames: ?usize) void {
             if (!PROFILING) {
-                std.log.warn("Profiling is disabled for this SpacialGrid setup; startProfiler() request ignored.", .{});
+                std.log.warn("Profiling is disabled for this SpacialGrid setup. startProfiler() request ignored.", .{});
                 return;
-            } else {
-                self.impl.profiler.start(
-                    max_frames,
-                    .{
-                        .Circle = self.impl.circle_storage.ent_count,
-                        .Rect = self.impl.rect_storage.ent_count,
-                        .Point = self.impl.point_storage.ent_count,
-                    },
-                );
             }
+
+            self.impl.profiler.start(max_frames);
         }
 
-        pub fn updateProfiler(self: *Self) void {
+        pub fn getProfileResults(self: *Self, clearScreen: bool) ![]const u8 {
             if (!self.impl.profiler.running) {
-                std.log.warn("startProfiler() must be called before updateProfiler(); request ignored.", .{});
-                return;
+                std.log.warn("startProfiler() must be called before updateProfiler(). Request ignored.", .{});
+                return "";
             }
 
             self.impl.profiler.update();
+            try self.impl.profiler.writeResults(self, clearScreen);
+            return self.impl.profiler.results.written();
         }
 
         pub fn stopProfiler(self: *Self) void {
@@ -617,20 +612,6 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                 .Rect = self.impl.rect_storage.ent_count,
                 .Point = self.impl.point_storage.ent_count,
             });
-        }
-
-        pub fn getProfilerResults(self: *Self) ![]const u8 {
-            if (!PROFILING) {
-                std.log.warn("Profiling is disabled for this SpacialGrid setup; getProfilerResults() is returning an empty result.", .{});
-                return "";
-            } else {
-                if (!self.impl.profiler.finished) {
-                    std.log.warn("startProfiler() and stopProfiler() must both be called before getProfilerResults(); returning an empty result.", .{});
-                    return "";
-                }
-                try self.impl.profiler.buildResults(self);
-                return self.impl.profiler.results.written();
-            }
         }
 
         const QueryIndices = struct {
