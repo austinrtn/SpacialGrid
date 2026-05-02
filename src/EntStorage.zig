@@ -124,9 +124,6 @@ pub fn EntStorage(comptime shape_type: ShapeType, comptime PROFILING: bool) type
                 self.counts[cell.idx] += 1;
             }
 
-            if (PROFILING)
-                grid.impl.profiler.cell_density.append(shape_type, self.counts) catch {};
-
             // Prefix-sum pass: rewrite counts[i] from "entity count in cell i"
             // to "start offset of cell i in the indices array".
             var total: u32 = 0;

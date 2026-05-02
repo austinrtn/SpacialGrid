@@ -1,10 +1,9 @@
 const std = @import("std");
 const ShapeType = @import("ShapeType.zig").ShapeType;
-const Arraylist = std.ArrayList;
 const Timestamp = std.Io.Clock.Timestamp;
 
 // Future useful profiler categories:
-// - Cell density: avg shapes per cell, max shapes in one cell, empty cell percent.
+// - Cell density: shapes per cell, shapes in one cell, empty cell percent.
 // - Candidate pressure: total narrowphase checks, checks per shape, checks per collision.
 // - Collision results: total collisions found, hit rate from candidates.
 // - Query pressure: avg queried cells and avg candidate shapes per query.
@@ -22,7 +21,7 @@ pub const Profiler = struct {
 
     time_elapsed: f64 = 0,
     frames: f64 = 0,
-    fps_tracker: Arraylist(f64) = .empty,
+    fps: f64 = 0,
 
     shape_count_start: ShapeCounts = undefined,
     shape_count_end: ShapeCounts = undefined,
@@ -32,6 +31,7 @@ pub const Profiler = struct {
     logged_max_frame_msg: bool = false,
 
     cell_density: CellDensity = undefined,
+    cell_data_text: []const u8 = undefined,
     timed_items: struct {
         build: ProfileItem,
         insert_circles: ProfileItem,
@@ -45,7 +45,8 @@ pub const Profiler = struct {
         const self = try allocator.create(Profiler);
         self.* = .{ .allocator = allocator, .io = io };
         self.results = .init(allocator);
-        self.cell_density = .{ .allocator = allocator, .profiler = self };
+        self.cell_data_text = try allocator.dupe(u8, "");
+        self.cell_density = .init();
 
         self.timed_items.build = .init(allocator, io, self, "Build", true);
         self.timed_items.insert_circles = .init(allocator, io, self, "Insert Circles", true);
@@ -58,8 +59,7 @@ pub const Profiler = struct {
 
     pub fn deinit(self: *Profiler) void {
         self.running = false;
-        self.cell_density.deinit();
-        self.fps_tracker.deinit(self.allocator);
+        self.allocator.free(self.cell_data_text);
 
         inline for (std.meta.fields(@TypeOf(self.timed_items))) |field| {
             const item = &@field(self.timed_items, field.name);
@@ -70,7 +70,7 @@ pub const Profiler = struct {
     }
 
     pub fn start(self: *Profiler, max_frames: ?usize) void {
-        if (max_frames) |f| ProfileItem.max_samples = f;
+        _ = max_frames;
         self.running = true;
         self.start_time = Timestamp.now(self.io, .awake);
         self.last_time = self.start_time.raw.nanoseconds;
@@ -78,16 +78,17 @@ pub const Profiler = struct {
 
     pub fn update(self: *Profiler) void {
         if (!self.running) return;
-        self.frames += 1;
+        const now = Timestamp.now(self.io, .awake);
+        const delta_ns = now.raw.nanoseconds - self.last_time;
+        self.last_time = now.raw.nanoseconds;
 
-        const elapsed_ts = self.start_time.durationTo(Timestamp.now(self.io, .awake));
+        self.frames += 1;
+        const elapsed_ts = self.start_time.durationTo(now);
 
         const elapsed_milis: f64 = @floatFromInt(elapsed_ts.raw.toMilliseconds());
         self.time_elapsed = elapsed_milis / 1000;
 
-        const elapsed_s: f64 = @floatFromInt(elapsed_ts.raw.toSeconds());
-        const fps: f64 = if (elapsed_s == 0) 0 else self.frames / elapsed_s;
-        self.fps_tracker.append(self.allocator, fps) catch {};
+        self.fps = if (delta_ns <= 0) 0 else 1_000_000_000.0 / @as(f64, @floatFromInt(delta_ns));
     }
 
     pub fn stop(self: *Profiler) void {
@@ -120,9 +121,9 @@ pub const Profiler = struct {
         //     try out.writeAll("\nShape Count:\n");
         //     try self.writeShapeCounts(self.shape_count_end);
         // }
-        // try out.writeAll("\n");
+        try out.writeAll("\n");
 
-        // try self.writeCellData(grid);
+        try self.writeCellData(grid);
         // try out.writeAll("\n");
         // try self.writeTimedItems();
     }
@@ -133,31 +134,37 @@ pub const Profiler = struct {
         try out.print("Time Profiled: {d:.2}s\n", .{self.time_elapsed});
         try out.print("Frame: {d:.0}\n", .{self.frames});
         try out.print("Threads: {}\n", .{grid.impl.thread_count});
+        try out.print("FPS: {d:.2}\n", .{self.fps});
     }
 
     fn writeCellData(self: *Profiler, grid: anytype) !void {
-        const out = &self.results.writer;
+        var writer: std.Io.Writer.Allocating = .init(self.allocator);
+        defer writer.deinit();
+        const out = &writer.writer;
 
         try out.writeAll("\nCell Data:\n");
         try out.print("  Rows: {}\n  Cols: {}\n", .{ grid.impl.rows, grid.impl.cols });
         try out.print("  Cell Size: {}\n  Cell Count: {}\n", .{ grid.impl.cell_size, grid.impl.rows * grid.impl.cols });
 
-        self.cell_density.setCellDensity();
+        self.cell_density.setCellDensity(grid);
 
         try out.writeAll("\n  Combined:\n");
-        try self.writeDensityData(self.cell_density.all_data);
+        try writeDensityData(self.cell_density.all_data, out);
         try out.writeAll("  Circle:\n");
-        try self.writeDensityData(self.cell_density.circle_data);
+        try writeDensityData(self.cell_density.circle_data, out);
         try out.writeAll("  Rect:\n");
-        try self.writeDensityData(self.cell_density.rect_data);
+        try writeDensityData(self.cell_density.rect_data, out);
         try out.writeAll("  Point:\n");
-        try self.writeDensityData(self.cell_density.point_data);
+        try writeDensityData(self.cell_density.point_data, out);
+
+        self.allocator.free(self.cell_data_text);
+        self.cell_data_text = try self.allocator.dupe(u8, writer.written());
+        try self.results.writer.print("{s}", .{self.cell_data_text});
     }
 
-    fn writeDensityData(self: *Profiler, data: CellDensity.DensityData) !void {
-        const out = &self.results.writer;
+    fn writeDensityData(data: CellDensity.DensityData, out: *std.Io.Writer) !void {
         try out.print(
-            "    Avg Shapes/Cell: {d:.2}\n    Avg Empty Cells: {d:.2}\n    Avg Max In Cell: {d:.2}\n",
+            "    Shapes/Cell: {d:.2}\n    Empty Cells: {d:.0}\n    Max In Cell: {d:.0}\n",
             .{ data.total, data.empty, data.max },
         );
     }
@@ -196,13 +203,11 @@ pub const Profiler = struct {
         const ItemFields = std.meta.fields(@TypeOf(self.timed_items));
         var relevant_sum: f64 = 0;
 
-        // Percent is based on average time so unequal sample counts do not skew the breakdown.
         inline for (ItemFields) |field| {
             const item = &@field(self.timed_items, field.name);
             if (item.include_percent and item.hasResults()) {
-                const avg = item.getAvg();
-                item.percent_time = avg.nanos;
-                relevant_sum += avg.nanos;
+                item.percent_time = item.last_time_ns;
+                relevant_sum += item.last_time_ns;
             }
         }
 
@@ -220,8 +225,7 @@ pub const Profiler = struct {
             if (!item.hasResults()) {
                 try out.writeAll("  N.A\n");
             } else {
-                const avg = item.getAvg();
-                try out.print("  Avg: {d:.4}ms", .{avg.millis});
+                try out.print("  Last: {d:.4}ms", .{item.last_time_ns / 1_000_000.0});
                 if (item.include_percent)
                     try out.print(" | {d:.2}%", .{item.percent});
             }
@@ -232,22 +236,18 @@ pub const Profiler = struct {
 };
 
 const ProfileItem = struct {
-    var max_samples: usize = 10_000;
-
-    allocator: std.mem.Allocator,
     io: std.Io,
 
     profiler: *Profiler,
     text: []const u8,
     include_percent: bool,
     start_time: Timestamp = undefined,
-    times: Arraylist(i96) = .empty,
+    last_time_ns: f64 = 0,
     percent: f64 = 0,
     percent_time: f64 = 0,
 
-    fn init(allocator: std.mem.Allocator, io: std.Io, profiler: *Profiler, text: []const u8, include_percent: bool) ProfileItem {
+    fn init(_: std.mem.Allocator, io: std.Io, profiler: *Profiler, text: []const u8, include_percent: bool) ProfileItem {
         return .{
-            .allocator = allocator,
             .io = io,
             .profiler = profiler,
             .text = text,
@@ -255,9 +255,7 @@ const ProfileItem = struct {
         };
     }
 
-    fn deinit(self: *ProfileItem) void {
-        self.times.deinit(self.allocator);
-    }
+    fn deinit(_: *ProfileItem) void {}
 
     pub fn start(self: *ProfileItem) void {
         if (!self.profiler.running) return;
@@ -266,163 +264,107 @@ const ProfileItem = struct {
 
     pub fn stop(self: *ProfileItem) !void {
         if (!self.profiler.running) return;
-        if (self.times.items.len >= max_samples) {
-            if (!self.profiler.logged_max_frame_msg) {
-                std.log.info("Max frames for profiler reached.  No longer running profiler", .{});
-                self.profiler.logged_max_frame_msg = true;
-            }
-            return;
-        }
         const end_time = self.start_time.durationTo(
             Timestamp.now(self.io, .awake),
         );
-        const ns = end_time.raw.toNanoseconds();
-
-        if (self.times.items.len < max_samples)
-            try self.times.append(self.allocator, ns);
+        self.last_time_ns = @floatFromInt(end_time.raw.toNanoseconds());
     }
 
     fn hasResults(self: ProfileItem) bool {
-        return (self.times.items.len > 0);
-    }
-
-    pub fn getAvg(self: ProfileItem) struct { nanos: f64, millis: f64 } {
-        var avg: f64 = 0;
-        for (self.times.items) |time| avg += @floatFromInt(time);
-
-        avg = avg / @as(f64, @floatFromInt(self.times.items.len));
-        const avg_ms = avg / 1_000_000.0;
-
-        return .{ .nanos = avg, .millis = avg_ms };
+        return self.last_time_ns > 0;
     }
 };
 
 const CellDensity = struct {
     const DensityData = struct { total: f64 = 0, empty: f64 = 0, max: f64 = 0 };
-    allocator: std.mem.Allocator,
-    profiler: *Profiler,
-
-    circle_counts: std.ArrayList([]u32) = .empty,
-    rect_counts: std.ArrayList([]u32) = .empty,
-    point_counts: std.ArrayList([]u32) = .empty,
 
     all_data: DensityData = .{},
     circle_data: DensityData = .{},
     rect_data: DensityData = .{},
     point_data: DensityData = .{},
 
-    pub fn append(self: *CellDensity, shape: ShapeType, count: []u32) !void {
-        const snapshot = try self.allocator.dupe(u32, count);
-        switch (shape) {
-            .Circle => try self.circle_counts.append(self.allocator, snapshot),
-            .Rect => try self.rect_counts.append(self.allocator, snapshot),
-            .Point => try self.point_counts.append(self.allocator, snapshot),
-        }
+    fn init() CellDensity {
+        return .{};
     }
 
-    fn deinit(self: *CellDensity) void {
-        for (self.circle_counts.items) |count| self.allocator.free(count);
-        for (self.rect_counts.items) |count| self.allocator.free(count);
-        for (self.point_counts.items) |count| self.allocator.free(count);
-        self.circle_counts.deinit(self.allocator);
-        self.rect_counts.deinit(self.allocator);
-        self.point_counts.deinit(self.allocator);
+    fn setCellDensity(self: *CellDensity, grid: anytype) void {
+        self.setShapeStorageDensity(grid.impl.circle_storage.counts, &self.circle_data);
+        self.setShapeStorageDensity(grid.impl.rect_storage.counts, &self.rect_data);
+        self.setShapeStorageDensity(grid.impl.point_storage.counts, &self.point_data);
+        self.setAllDensity(
+            grid.impl.circle_storage.counts,
+            grid.impl.rect_storage.counts,
+            grid.impl.point_storage.counts,
+        );
     }
 
-    fn setCellDensity(self: *CellDensity) void {
-        for (std.meta.tags(ShapeType)) |shape| {
-            switch (shape) {
-                .Circle => setShapeStorageDensity(self.circle_counts.items, &self.circle_data),
-                .Rect => setShapeStorageDensity(self.rect_counts.items, &self.rect_data),
-                .Point => setShapeStorageDensity(self.point_counts.items, &self.point_data),
-            }
-        }
-        self.setAllDensity();
-    }
-
-    fn setShapeStorageDensity(counts: [][]u32, data: *DensityData) void {
+    fn setShapeStorageDensity(self: *CellDensity, counts: []const u32, data: *DensityData) void {
+        _ = self;
         if (counts.len == 0) {
             data.* = .{};
             return;
         }
 
-        var avg_shapes_per_cell: f64 = 0;
-        var max_avg: f64 = 0;
-        var empty_avg: f64 = 0;
+        var total: usize = 0;
+        var empty: usize = 0;
+        var max: usize = 0;
 
-        for (counts) |count| {
-            var total: usize = 0;
-            var empty: usize = 0;
-            var max: usize = 0;
-
-            for (count) |c32| {
-                const c: usize = @intCast(c32);
-                total += c;
-                if (c == 0) empty += 1;
-                max = @max(max, c);
-            }
-
-            const cell_count = @as(f64, @floatFromInt(count.len));
-            avg_shapes_per_cell += @as(f64, @floatFromInt(total)) / cell_count;
-            empty_avg += @as(f64, @floatFromInt(empty));
-            max_avg += @as(f64, @floatFromInt(max));
+        for (0..counts.len) |i| {
+            const c: usize = if (i == 0)
+                @intCast(counts[0])
+            else
+                @intCast(counts[i] - counts[i - 1]);
+            total += c;
+            if (c == 0) empty += 1;
+            max = @max(max, c);
         }
 
-        const sample_count = @as(f64, @floatFromInt(counts.len));
-        avg_shapes_per_cell = avg_shapes_per_cell / sample_count;
-        max_avg = max_avg / sample_count;
-        empty_avg = empty_avg / sample_count;
+        const cell_count = @as(f64, @floatFromInt(counts.len));
 
         data.* = .{
-            .total = avg_shapes_per_cell,
-            .max = max_avg,
-            .empty = empty_avg,
+            .total = @as(f64, @floatFromInt(total)) / cell_count,
+            .max = @floatFromInt(max),
+            .empty = @floatFromInt(empty),
         };
     }
 
-    fn setAllDensity(self: *CellDensity) void {
-        const sample_count = @min(self.circle_counts.items.len, self.rect_counts.items.len, self.point_counts.items.len);
-        if (sample_count == 0) {
+    fn setAllDensity(self: *CellDensity, circle_counts: []const u32, rect_counts: []const u32, point_counts: []const u32) void {
+        const cell_len = @min(circle_counts.len, rect_counts.len, point_counts.len);
+        if (cell_len == 0) {
             self.all_data = .{};
             return;
         }
 
-        var avg_shapes_per_cell: f64 = 0;
-        var max_avg: f64 = 0;
-        var empty_avg: f64 = 0;
+        var total: usize = 0;
+        var empty: usize = 0;
+        var max: usize = 0;
 
-        for (0..sample_count) |frame_idx| {
-            const circle = self.circle_counts.items[frame_idx];
-            const rect = self.rect_counts.items[frame_idx];
-            const point = self.point_counts.items[frame_idx];
-            const cell_len = @min(circle.len, rect.len, point.len);
-            if (cell_len == 0) continue;
-
-            var total: usize = 0;
-            var empty: usize = 0;
-            var max: usize = 0;
-
-            for (0..cell_len) |cell_idx| {
-                const combined: usize = circle[cell_idx] + rect[cell_idx] + point[cell_idx];
-                total += combined;
-                if (combined == 0) empty += 1;
-                max = @max(max, combined);
-            }
-
-            const cell_count = @as(f64, @floatFromInt(cell_len));
-            avg_shapes_per_cell += @as(f64, @floatFromInt(total)) / cell_count;
-            empty_avg += @as(f64, @floatFromInt(empty));
-            max_avg += @as(f64, @floatFromInt(max));
+        for (0..cell_len) |cell_idx| {
+            const combined: usize =
+                getCellCount(circle_counts, cell_idx) +
+                getCellCount(rect_counts, cell_idx) +
+                getCellCount(point_counts, cell_idx);
+            total += combined;
+            if (combined == 0) empty += 1;
+            max = @max(max, combined);
         }
 
-        const frames = @as(f64, @floatFromInt(sample_count));
+        const cell_count = @as(f64, @floatFromInt(cell_len));
         self.all_data = .{
-            .total = avg_shapes_per_cell / frames,
-            .empty = empty_avg / frames,
-            .max = max_avg / frames,
+            .total = @as(f64, @floatFromInt(total)) / cell_count,
+            .empty = @floatFromInt(empty),
+            .max = @floatFromInt(max),
         };
     }
 };
+
+fn getCellCount(counts: []const u32, idx: usize) usize {
+    if (idx >= counts.len) return 0;
+    return if (idx == 0)
+        @intCast(counts[0])
+    else
+        @intCast(counts[idx] - counts[idx - 1]);
+}
 
 const ShapeCounts = @Struct(
     .auto,
