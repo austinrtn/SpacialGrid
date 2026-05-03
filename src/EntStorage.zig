@@ -3,6 +3,7 @@ const ShapeType = @import("ShapeType.zig").ShapeType;
 const CollisionPair = @import("SpacialGrid.zig").CollisionPair;
 
 pub fn EntStorage(comptime shape_type: ShapeType, comptime PROFILING: bool) type {
+    _ = PROFILING;
     return struct {
         const Self = @This();
         pub const ShapeDataType = switch (shape_type) {
@@ -182,6 +183,35 @@ pub fn EntStorage(comptime shape_type: ShapeType, comptime PROFILING: bool) type
                 else => unreachable,
             }
             return size;
+        }
+
+        pub fn getProfileData(self: *Self) struct { avg: f32, largest: f32, smallest: f32, count: usize } {
+            if (self.ent_count == 0 or shape_type == .Point) {
+                return .{ .avg = 0, .largest = 0, .smallest = 0, .count = self.ent_count };
+            }
+
+            var total_size: f32 = 0;
+            var smallest: f32 = std.math.inf(f32);
+            var largest: f32 = 0;
+
+            for (0..self.ent_count) |i| {
+                const area: f32 = switch (shape_type) {
+                    .Circle => blk: {
+                        const r = self.shape_data.radii[i];
+                        break :blk std.math.pi * r * r;
+                    },
+                    .Rect => self.shape_data.widths[i] * self.shape_data.heights[i],
+                    .Point => unreachable,
+                };
+
+                smallest = @min(smallest, area);
+                largest = @max(largest, area);
+                total_size += area;
+            }
+
+            const avg: f32 = total_size / @as(f32, @floatFromInt(self.ent_count));
+
+            return .{ .avg = avg, .largest = largest, .smallest = smallest, .count = self.ent_count };
         }
     };
 }
