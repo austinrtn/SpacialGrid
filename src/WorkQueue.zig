@@ -1,7 +1,7 @@
 const std = @import("std");
+pub const Kernel = enum {cc, cr, cp, rr, rc, rp, pp, pc, pr};
 
 pub const WorkItem = struct {
-    pub const Kernel = enum {cc, cr, cp, rr, rc, rp, pp, pc, pr};
     kernel: Kernel,
     start: usize,
     end: usize,
@@ -39,21 +39,21 @@ pub const WorkQueue = struct {
     }
 
     pub fn appendWork(self: *WorkQueue, work: WorkItem) !void {
-        try self.work.append(self.allocator, work); 
+        try self.work.append(self.allocator, work);
     }
 
     pub fn getNextWorkItem(self: *WorkQueue, m_threaded: bool) !?WorkItem{
         if(m_threaded) {
             try self.mu.lock(self.io);
             defer self.mu.unlock(self.io);
-            if(self.index >= self.work.items.len) return null; 
+            if(self.index >= self.work.items.len) return null;
 
             const items = self.work.items[self.index];
             self.index += 1;
 
             return items;
         } else {
-            if(self.index >= self.work.items.len) return null; 
+            if(self.index >= self.work.items.len) return null;
 
             const items = self.work.items[self.index];
             self.index += 1;

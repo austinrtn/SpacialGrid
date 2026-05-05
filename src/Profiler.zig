@@ -10,6 +10,16 @@ const Timestamp = std.Io.Clock.Timestamp;
 // - Worker balance: per-thread time, work items processed, candidates checked, collisions found.
 // - Memory behavior: result list capacity, query buffer capacity, realloc counts.
 
+pub const CollisionCounter = struct {
+    pressure: f32 = 0,
+    hits: f32 = 0,
+
+    pub fn reset(self: *@This()) void {
+        self.pressure = 0;
+        self.hits = 0;
+    }
+};
+
 pub const Profiler = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -30,8 +40,13 @@ pub const Profiler = struct {
     finished: bool = false,
     logged_max_frame_msg: bool = false,
 
+    collision_candidates: std.atomic.Value(usize) = .init(0),
+    narrowphase_hits: std.atomic.Value(usize) = .init(0),
+    narrowphase_misses: std.atomic.Value(usize) = .init(0),
+
     cell_density: CellDensity = undefined,
-    cell_data_text: []const u8 = undefined,
+    cell_data_text: []const u8 = undefined, // This likely needs to be depreciated
+
     timed_items: struct {
         build: ProfileItem,
         insert_circles: ProfileItem,
@@ -99,7 +114,7 @@ pub const Profiler = struct {
 
     pub fn writeResults(self: *Profiler, grid: anytype, clear_screen: bool) !void {
         if(@mod(self.frames, 10) != 0 and self.frames > 10) return;
-            
+
         self.results.clearRetainingCapacity();
         const out = &self.results.writer;
         if (clear_screen) try out.writeAll("\x1b[2J \x1b[H");
@@ -117,6 +132,31 @@ pub const Profiler = struct {
         try self.writeCellData(grid);
         try out.writeAll("\n");
         try self.writeTimedItems();
+
+        const collision_counter: struct{attempts: f32, hits: f32} = blk: {
+            if(!grid.impl.multi_threaded) {
+                break :blk grid.impl.collision_counter;
+            }
+
+            // If grid is multi-threaded
+            var attempts: f32 = 0;
+            var hits: f32 = 0;
+
+            for(grid.impl.workers) |worker| {
+                attempts += worker.collision_counter.attemtps;
+                hits += worker.collision_counter.hits;
+                worker.collision_counter.reset();
+            }
+            break :blk .{.attempts = attempts, .hits = hits};
+        };
+
+        const missed = collision_counter.attempts - collision_counter.hits;
+        const hits_percent: f32 = collision_counter.hits / collision_counter.attempts * 100;
+        const miss_percent: f32 = missed / collision_counter.attempts * 100;
+
+        try out.print("\nQuery Pressure: {}\n", .{collision_counter.attempts});
+        try out.print("Collisions Detected: {} | {d:.2}%\n", .{collision_counter.hits, hits_percent});
+        try out.print("Collisions Missed: {} | {d:.2}%\n", .{self.narrowphase_misses, miss_percent});
     }
 
     fn writeGridData(self: *Profiler, grid: anytype) !void {
@@ -254,7 +294,7 @@ const ProfileItem = struct {
             .include_percent = include_percent,
         };
     }
-    
+
     pub fn start(self: *ProfileItem) void {
         if (!self.profiler.running) return;
         self.start_time = Timestamp.now(self.io, .awake);

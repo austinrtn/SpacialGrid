@@ -4,10 +4,13 @@ const Vector2 = @import("Vector2.zig").Vector2;
 const Worker = @import("Worker.zig").Worker;
 const WorkQueueMod = @import("WorkQueue.zig");
 const WorkQueue = WorkQueueMod.WorkQueue;
+const Kernel =  WorkQueueMod.Kernel;
 const WorkItem = WorkQueueMod.WorkItem;
 
 const Insert = @import("Insert.zig").Insert;
-const Profiler = @import("Profiler.zig").Profiler;
+const ProfilerMod = @import("Profiler.zig");
+const Profiler = ProfilerMod.Profiler;
+const CollisionCounter = ProfilerMod.CollisionCounter;
 
 const Setup = @import("ZigGridLib.zig").Setup;
 const ShapeTypeMod = @import("ShapeType.zig");
@@ -30,9 +33,10 @@ pub fn CollisionData(comptime Vec2: type) type {
 }
 
 /// The struct that is returned when two entities collide
-pub const CollisionPair = packed struct {
+pub const CollisionPair = struct {
     a: u32,
     b: u32,
+    kernel: Kernel,
 };
 
 const CellData = struct { row: usize, col: usize, idx: usize };
@@ -90,6 +94,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
             circle_storage: EntStorage(.Circle, PROFILING) = undefined,
             rect_storage: EntStorage(.Rect, PROFILING) = undefined,
             point_storage: EntStorage(.Point, PROFILING) = undefined,
+            collision_counter: CollisionCounter = .{},
 
             multi_threaded: bool = false,
             thread_count: usize = 1,
@@ -156,21 +161,31 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                 work_item: WorkItem,
                 query_buf: []u32,
                 col_list: *std.ArrayList(CollisionPair),
+                collision_counter: anytype,
             ) void {
                 switch (work_item.kernel) {
-                    .cc => self.findCollision(.Circle, .Circle, grid, work_item, col_list, query_buf),
-                    .rr => self.findCollision(.Rect, .Rect, grid, work_item, col_list, query_buf),
-                    .pp => self.findCollision(.Point, .Point, grid, work_item, col_list, query_buf),
-                    .cr => self.findCollision(.Circle, .Rect, grid, work_item, col_list, query_buf),
-                    .rc => self.findCollision(.Rect, .Circle, grid, work_item, col_list, query_buf),
-                    .cp => self.findCollision(.Circle, .Point, grid, work_item, col_list, query_buf),
-                    .pc => self.findCollision(.Point, .Circle, grid, work_item, col_list, query_buf),
-                    .rp => self.findCollision(.Rect, .Point, grid, work_item, col_list, query_buf),
-                    .pr => self.findCollision(.Point, .Rect, grid, work_item, col_list, query_buf),
+                    .cc => self.findCollision(.Circle, .Circle, grid, work_item, col_list, query_buf, collision_counter),
+                    .rr => self.findCollision(.Rect, .Rect, grid, work_item, col_list, query_buf, collision_counter),
+                    .pp => self.findCollision(.Point, .Point, grid, work_item, col_list, query_buf, collision_counter),
+                    .cr => self.findCollision(.Circle, .Rect, grid, work_item, col_list, query_buf, collision_counter),
+                    .rc => self.findCollision(.Rect, .Circle, grid, work_item, col_list, query_buf, collision_counter),
+                    .cp => self.findCollision(.Circle, .Point, grid, work_item, col_list, query_buf, collision_counter),
+                    .pc => self.findCollision(.Point, .Circle, grid, work_item, col_list, query_buf, collision_counter),
+                    .rp => self.findCollision(.Rect, .Point, grid, work_item, col_list, query_buf, collision_counter),
+                    .pr => self.findCollision(.Point, .Rect, grid, work_item, col_list, query_buf, collision_counter),
                 }
             }
 
-            fn findCollision(self: *@This(), comptime outer_shape: ShapeType, comptime inner_shape: ShapeType, grid: anytype, work_item: WorkItem, col_list: *std.ArrayList(CollisionPair), buf: []u32) void {
+            fn findCollision(
+                self: *@This(),
+                comptime outer_shape: ShapeType,
+                comptime inner_shape: ShapeType,
+                grid: anytype,
+                work_item: WorkItem,
+                col_list: *std.ArrayList(CollisionPair),
+                buf: []u32,
+                collision_counter: anytype,
+            ) void {
                 const cd = CollisionDetection(Vec2);
                 var outer_storage = switch (outer_shape) {
                     .Circle => self.circle_storage,
@@ -195,12 +210,15 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                         const idx_b: usize = @intCast(idx_b_u32);
                         if (outer_shape == inner_shape and idx_a >= idx_b) continue;
 
+                        if(PROFILING) collision_counter.pressure += 1;
+
                         const x_b = inner_storage.xs[idx_b];
                         const y_b = inner_storage.ys[idx_b];
                         const id_b = inner_storage.ids[idx_b];
 
-                        const pair: CollisionPair = .{ .a = id_a, .b = id_b };
+                        const pair: CollisionPair = .{ .a = id_a, .b = id_b, .kernel = work_item.kernel};
                         var colliding: bool = false;
+
                         switch (outer_shape) {
                             .Circle => {
                                 const r_a = outer_storage.shape_data.radii[idx_a];
@@ -250,6 +268,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                         }
 
                         if (colliding) col_list.append(self.allocator, pair) catch continue;
+                        if(PROFILING and colliding) collision_counter.hits += 1;
                     }
                 }
             }
@@ -369,13 +388,11 @@ pub fn SpacialGrid(comptime setup: Setup) type {
             try self.generateKernelItems(.pp, point_count);
 
             try self.generateKernelItems(if (circle_count <= rect_count) .cr else .rc, @min(circle_count, rect_count));
-
             try self.generateKernelItems(if (circle_count <= point_count) .cp else .pc, @min(circle_count, point_count));
-
             try self.generateKernelItems(if (rect_count <= point_count) .rp else .pr, @min(rect_count, point_count));
         }
 
-        fn generateKernelItems(self: *Self, kernel: WorkItem.Kernel, count: usize) !void {
+        fn generateKernelItems(self: *Self, kernel: Kernel, count: usize) !void {
             const slice_unit: usize = 250;
             const queue = &self.impl.work_queue;
 
@@ -487,7 +504,13 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                 if (PROFILING) profiler.timed_items.find_collision.start();
 
                 while (try self.impl.work_queue.getNextWorkItem(false)) |item| {
-                    self.impl.findCollisions(self, item, self.impl.query_buf, &self.results);
+                    self.impl.findCollisions(
+                        self,
+                        item,
+                        self.impl.query_buf,
+                        &self.results,
+                        &self.impl.collision_counter
+                    );
                 }
 
                 if (PROFILING) try profiler.timed_items.find_collision.stop();

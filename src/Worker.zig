@@ -2,6 +2,7 @@ const std = @import("std");
 const SpacialGrid = @import("SpacialGrid.zig").SpacialGrid;
 const Setup = @import("ZigGridLib.zig").Setup;
 const CollisionPair = @import("SpacialGrid.zig").CollisionPair;
+const CollisionCounter = @import("Profiler.zig").CollisionCounter;
 
 pub fn Worker(comptime setup: Setup) type {
     const Grid = SpacialGrid(setup);
@@ -11,6 +12,7 @@ pub fn Worker(comptime setup: Setup) type {
         work_semaphore: std.Io.Semaphore = .{},
         done_semaphore: std.Io.Semaphore = .{},
         shutdown: std.atomic.Value(bool) = .init(false),
+        collision_counter: CollisionCounter = .{},
 
         allocator: std.mem.Allocator,
         io: std.Io,
@@ -56,9 +58,8 @@ pub fn Worker(comptime setup: Setup) type {
                 while(
                     queue.getNextWorkItem(true)
                     catch @panic("Mutex Cancled Error in WorkerQueue.zig\n")
-                ) |item| 
-
-                    self.grid.impl.findCollisions(self.grid, item, self.query_buf, &self.col_list);
+                ) |item|
+                    self.grid.impl.findCollisions(self.grid, item, self.query_buf, &self.col_list, &self.collision_counter);
                     self.done_semaphore.post(self.io);
             }
         }
