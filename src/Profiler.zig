@@ -80,8 +80,7 @@ pub const Profiler = struct {
         self.allocator.destroy(self);
     }
 
-    pub fn start(self: *Profiler, max_frames: ?usize) void {
-        _ = max_frames;
+    pub fn start(self: *Profiler) void {
         self.running = true;
         self.start_time = Timestamp.now(self.io, .awake);
         self.last_time = self.start_time.raw.nanoseconds;
@@ -117,7 +116,7 @@ pub const Profiler = struct {
 
         self.results.clearRetainingCapacity();
         const out = &self.results.writer;
-        if (clear_screen) try out.writeAll("\x1b[2J \x1b[H");
+        if (clear_screen) try out.writeAll("\x1b[2J\x1b[H");
         const header: []const u8 = "Spacial Grid Profiling";
         try out.print("{s}\n", .{header});
 
@@ -133,30 +132,28 @@ pub const Profiler = struct {
         try out.writeAll("\n");
         try self.writeTimedItems();
 
-        const collision_counter: struct{attempts: f32, hits: f32} = blk: {
-            if(!grid.impl.multi_threaded) {
-                break :blk grid.impl.collision_counter;
-            }
+        const collision_counter: CollisionCounter = blk: {
+            if(!grid.impl.multi_threaded) break :blk grid.impl.collision_counter;
 
             // If grid is multi-threaded
             var attempts: f32 = 0;
             var hits: f32 = 0;
 
-            for(grid.impl.workers) |worker| {
-                attempts += worker.collision_counter.attemtps;
+            for(grid.impl.workers) |*worker| {
+                attempts += worker.collision_counter.pressure;
                 hits += worker.collision_counter.hits;
                 worker.collision_counter.reset();
             }
-            break :blk .{.attempts = attempts, .hits = hits};
+            break :blk CollisionCounter{.pressure = attempts, .hits = hits};
         };
 
-        const missed = collision_counter.attempts - collision_counter.hits;
-        const hits_percent: f32 = collision_counter.hits / collision_counter.attempts * 100;
-        const miss_percent: f32 = missed / collision_counter.attempts * 100;
+        const missed: f32 = collision_counter.pressure - collision_counter.hits;
+        const hits_percent: f32 = collision_counter.hits / collision_counter.pressure * 100;
+        const miss_percent: f32 = missed / collision_counter.pressure * 100;
 
-        try out.print("\nQuery Pressure: {}\n", .{collision_counter.attempts});
+        try out.print("\nQuery Pressure: {}\n", .{collision_counter.pressure});
         try out.print("Collisions Detected: {} | {d:.2}%\n", .{collision_counter.hits, hits_percent});
-        try out.print("Collisions Missed: {} | {d:.2}%\n", .{self.narrowphase_misses, miss_percent});
+        try out.print("Collisions Missed: {} | {d:.2}%\n", .{missed, miss_percent});
     }
 
     fn writeGridData(self: *Profiler, grid: anytype) !void {
@@ -179,6 +176,7 @@ pub const Profiler = struct {
         try out.print("  Rows       : {}\n", .{grid.impl.rows});
         try out.print("  Cols       : {}\n", .{grid.impl.cols});
         try out.print("  Cell Size  : {d:.2}\n", .{grid.impl.cell_size});
+        try out.print("  Cell Mult  : {d:.2}\n", .{grid.cell_size_multiplier});
         try out.print("  Cell Count : {}\n", .{grid.impl.rows * grid.impl.cols});
 
         self.cell_density.setCellDensity(grid);

@@ -577,9 +577,9 @@ pub fn SpacialGrid(comptime setup: Setup) type {
         /// Must be called before SpacialGrid.update and must be called whenever the maximum size
         /// for an entity changes.
         pub fn updateCellSize(self: *Self, cell_size_mult: ?f32) !void {
-            if (cell_size_mult) |int| {
-                if (int < 1) @panic("cell_size_mult must be greater than or equal to 1\n");
-                self.cell_size_multiplier = int;
+            if (cell_size_mult) |mult| {
+                if (mult < 1) @panic("cell_size_mult must be greater than or equal to 1\n");
+                self.cell_size_multiplier = mult;
             }
 
             var cell_size: f32 = @max(
@@ -599,13 +599,13 @@ pub fn SpacialGrid(comptime setup: Setup) type {
             try self.impl.point_storage.setCounts(rows, cols);
         }
 
-        pub fn startProfiler(self: *Self, max_frames: ?usize) void {
+        pub fn startProfiler(self: *Self) void {
             if (!PROFILING) {
                 std.log.warn("Profiling is disabled for this SpacialGrid setup. startProfiler() request ignored.", .{});
                 return;
             }
 
-            self.impl.profiler.start(max_frames);
+            self.impl.profiler.start();
         }
 
         pub fn getProfileResults(self: *Self, clearScreen: bool) ![]const u8 {
