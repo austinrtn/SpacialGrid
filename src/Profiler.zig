@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const ProfileFrame = @import("ProfileFrame.zig").ProfileFrame;
 const ShapeType = @import("ShapeType.zig").ShapeType;
 const Timestamp = std.Io.Clock.Timestamp;
 
@@ -20,32 +21,28 @@ pub const CollisionCounter = struct {
     }
 };
 
+fn getCellCount(counts: []const u32, idx: usize) usize {
+    if (idx >= counts.len) return 0;
+    return if (idx == 0)
+        @intCast(counts[0])
+    else
+        @intCast(counts[idx] - counts[idx - 1]);
+}
+
 pub const Profiler = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
     results: std.Io.Writer.Allocating = undefined,
+    profile_frames: std.ArrayList(ProfileFrame) = .empty,
 
     start_time: Timestamp = undefined,
-    end_time: f64 = 0,
     last_time: i96 = undefined,
 
     time_elapsed: f64 = 0,
-    frames: f64 = 0,
+    frames: usize = 0,
     fps: f64 = 0,
 
-    shape_count_start: ShapeCounts = undefined,
-    shape_count_end: ShapeCounts = undefined,
-
     running: bool = false,
-    finished: bool = false,
-    logged_max_frame_msg: bool = false,
-
-    collision_candidates: std.atomic.Value(usize) = .init(0),
-    narrowphase_hits: std.atomic.Value(usize) = .init(0),
-    narrowphase_misses: std.atomic.Value(usize) = .init(0),
-
-    cell_density: CellDensity = undefined,
-    cell_data_text: []const u8 = undefined, // This likely needs to be depreciated
 
     timed_items: struct {
         build: ProfileItem,
@@ -60,8 +57,6 @@ pub const Profiler = struct {
         const self = try allocator.create(Profiler);
         self.* = .{ .allocator = allocator, .io = io };
         self.results = .init(allocator);
-        self.cell_data_text = try allocator.dupe(u8, "");
-        self.cell_density = .init();
 
         self.timed_items.build = .init(io, self, "Build", true);
         self.timed_items.insert_circles = .init(io, self, "Insert Circles", true);
@@ -74,8 +69,8 @@ pub const Profiler = struct {
 
     pub fn deinit(self: *Profiler) void {
         self.running = false;
-        self.allocator.free(self.cell_data_text);
 
+        self.profile_frames.deinit(self.allocator);
         self.results.deinit();
         self.allocator.destroy(self);
     }
@@ -102,174 +97,67 @@ pub const Profiler = struct {
     }
 
     pub fn stop(self: *Profiler) void {
-        const elapsed_dur = self.start_time.durationTo(
-            Timestamp.now(self.io, .awake),
-        );
-
-        self.end_time = @floatFromInt(elapsed_dur.raw.toMilliseconds());
         self.running = false;
-        self.finished = true;
     }
 
     pub fn writeResults(self: *Profiler, grid: anytype, clear_screen: bool) !void {
-        if(@mod(self.frames, 10) != 0 and self.frames > 10) return;
+        if (@mod(self.frames, 10) != 0 and self.frames > 10) return;
 
+        const frame = self.captureFrame(grid);
+        try self.profile_frames.append(self.allocator, frame);
+        try self.writeFrame(frame, clear_screen);
+    }
+
+    fn writeFrame(self: *Profiler, frame: ProfileFrame, clear_screen: bool) !void {
         self.results.clearRetainingCapacity();
         const out = &self.results.writer;
         if (clear_screen) try out.writeAll("\x1b[2J\x1b[H");
-        const header: []const u8 = "Spacial Grid Profiling";
-        try out.print("{s}\n", .{header});
+        try frame.fmt(out);
+    }
 
-        for (0..header.len) |_| try out.writeAll("_");
-        try out.writeAll("\n");
+    fn captureFrame(self: *Profiler, grid: anytype) ProfileFrame {
+        var cell_density: CellDensity = .{};
+        cell_density.setCellDensity(grid);
 
-        try out.writeAll("\n");
-
-        try self.writeGridData(grid);
-        try out.writeAll("\n");
-        try self.writeShapeCounts(grid);
-        try self.writeCellData(grid);
-        try out.writeAll("\n");
-        try self.writeTimedItems();
-
-        const collision_counter: CollisionCounter = blk: {
-            if(!grid.impl.multi_threaded) break :blk grid.impl.collision_counter;
-
-            // If grid is multi-threaded
-            var attempts: f32 = 0;
-            var hits: f32 = 0;
-
-            for(grid.impl.workers) |*worker| {
-                attempts += worker.collision_counter.pressure;
-                hits += worker.collision_counter.hits;
-                worker.collision_counter.reset();
-            }
-            break :blk CollisionCounter{.pressure = attempts, .hits = hits};
+        return .{
+            .grid = self.captureGridData(grid),
+            .shapes = captureShapeCounts(grid),
+            .cells = captureCellData(grid, cell_density),
+            .timing = self.captureTimingData(),
+            .detection = captureDetectionData(grid),
         };
-
-        const missed: f32 = collision_counter.pressure - collision_counter.hits;
-        const hits_percent: f32 = collision_counter.hits / collision_counter.pressure * 100;
-        const miss_percent: f32 = missed / collision_counter.pressure * 100;
-
-        try out.print("\nQuery Pressure: {}\n", .{collision_counter.pressure});
-        try out.print("Collisions Detected: {} | {d:.2}%\n", .{collision_counter.hits, hits_percent});
-        try out.print("Collisions Missed: {} | {d:.2}%\n", .{missed, miss_percent});
     }
 
-    fn writeGridData(self: *Profiler, grid: anytype) !void {
-        const out = &self.results.writer;
-
-        try out.writeAll("Grid\n");
-        try out.print("  Build      : {s}\n", .{@tagName(builtin.mode)});
-        try out.print("  Time       : {d:.2}s\n", .{self.time_elapsed});
-        try out.print("  Frame      : {d:.0}\n", .{self.frames});
-        try out.print("  Threads    : {}\n", .{grid.impl.thread_count});
-        try out.print("  FPS        : {d:.2}\n", .{self.fps});
+    fn captureGridData(self: *Profiler, grid: anytype) ProfileFrame.Grid {
+        return .{
+            .build = @tagName(builtin.mode),
+            .elapsed = self.time_elapsed,
+            .frame = self.frames,
+            .threads = grid.impl.thread_count,
+            .fps = self.fps,
+            .area_pixels = grid.impl.width * grid.impl.height,
+        };
     }
 
-    fn writeCellData(self: *Profiler, grid: anytype) !void {
-        var writer: std.Io.Writer.Allocating = .init(self.allocator);
-        defer writer.deinit();
-        const out = &writer.writer;
-
-        try out.writeAll("\nCells\n");
-        try out.print("  Rows       : {}\n", .{grid.impl.rows});
-        try out.print("  Cols       : {}\n", .{grid.impl.cols});
-        try out.print("  Cell Size  : {d:.2}\n", .{grid.impl.cell_size});
-        try out.print("  Cell Mult  : {d:.2}\n", .{grid.cell_size_multiplier});
-        try out.print("  Cell Count : {}\n", .{grid.impl.rows * grid.impl.cols});
-
-        self.cell_density.setCellDensity(grid);
-
-        try out.writeAll("\n  Type      | Avg Shapes/Cell | Empty Cells | Max In Cell\n");
-        try writeDensityData("Combined", self.cell_density.all_data, out);
-        try writeDensityData("Circle", self.cell_density.circle_data, out);
-        try writeDensityData("Rect", self.cell_density.rect_data, out);
-        try writeDensityData("Point", self.cell_density.point_data, out);
-
-        self.allocator.free(self.cell_data_text);
-        self.cell_data_text = try self.allocator.dupe(u8, writer.written());
-        try self.results.writer.print("{s}", .{self.cell_data_text});
-    }
-
-    fn writeDensityData(label: []const u8, data: CellDensity.DensityData, out: *std.Io.Writer) !void {
-        try out.print(
-            "  {s:<9} | {d:>15.2} | {d:>11.0} | {d:>5.0}\n",
-            .{ label, data.total, data.empty, data.max },
-        );
-    }
-
-    fn writeShapeCounts(self: *Profiler, grid: anytype) !void {
-        const out = &self.results.writer;
-
-        const circles = grid.impl.circle_storage.getProfileData();
-        const rects = grid.impl.rect_storage.getProfileData();
-        const points = grid.impl.point_storage.getProfileData();
-
-        const total_count = circles.count + rects.count + points.count;
-
-        try out.writeAll("Shapes\n");
-        try out.print("  Total      : {}\n", .{total_count});
-        try out.writeAll("\n  Type    | Count | Avg Size | Min Size | Max Size\n");
-        try out.print(
-            "  Circle  | {d:>5} | {d:>8.2} | {d:>8.2} | {d:>8.2}\n",
-            .{ circles.count, circles.avg, circles.smallest, circles.largest },
-        );
-        try out.print(
-            "  Rect    | {d:>5} | {d:>8.2} | {d:>8.2} | {d:>8.2}\n",
-            .{ rects.count, rects.avg, rects.smallest, rects.largest },
-        );
-        try out.print(
-            "  Point   | {d:>5} | {d:>8.2} | {d:>8.2} | {d:>8.2}\n",
-            .{ points.count, points.avg, points.smallest, points.largest },
-        );
-    }
-
-    fn writeTimedItems(self: *Profiler) !void {
-        const out = &self.results.writer;
+    fn captureTimingData(self: *Profiler) ProfileFrame.Timing {
         const ItemFields = std.meta.fields(@TypeOf(self.timed_items));
         var relevant_sum: f64 = 0;
 
         inline for (ItemFields) |field| {
-            const item = &@field(self.timed_items, field.name);
+            const item = @field(self.timed_items, field.name);
             if (item.include_percent and item.hasResults()) {
-                item.percent_time = item.last_time_ns;
                 relevant_sum += item.last_time_ns;
             }
         }
 
-        inline for (ItemFields) |field| {
-            const item = &@field(self.timed_items, field.name);
-            if (item.include_percent and item.hasResults() and relevant_sum > 0) {
-                item.percent = (item.percent_time / relevant_sum) * 100;
-            }
-        }
-
-        try out.writeAll("Timing\n");
-        try out.writeAll("  Stage               | Last (ms) | Percent\n");
-
-        inline for (ItemFields) |field| {
-            const item = @field(self.timed_items, field.name);
-            if (!item.hasResults()) {
-                if (item.include_percent) {
-                    try out.print("  {s:<19} | {s:>9} | {s:>7}\n", .{ item.text, "N.A", "N.A" });
-                } else {
-                    try out.print("  {s:<19} | {s:>9} | {s:>7}\n", .{ item.text, "N.A", "-" });
-                }
-            } else {
-                if (item.include_percent) {
-                    try out.print(
-                        "  {s:<19} | {d:>9.4} | {d:>6.2}%\n",
-                        .{ item.text, item.last_time_ns / 1_000_000.0, item.percent },
-                    );
-                } else {
-                    try out.print(
-                        "  {s:<19} | {d:>9.4} | {s:>7}\n",
-                        .{ item.text, item.last_time_ns / 1_000_000.0, "-" },
-                    );
-                }
-            }
-        }
+        return .{
+            .build = timingData(self.timed_items.build, relevant_sum),
+            .insert_circles = timingData(self.timed_items.insert_circles, relevant_sum),
+            .insert_rects = timingData(self.timed_items.insert_rects, relevant_sum),
+            .insert_points = timingData(self.timed_items.insert_points, relevant_sum),
+            .finding_collisions = timingData(self.timed_items.find_collision, relevant_sum),
+            .update = timingData(self.timed_items.update, relevant_sum),
+        };
     }
 };
 
@@ -281,8 +169,6 @@ const ProfileItem = struct {
     include_percent: bool,
     start_time: Timestamp = undefined,
     last_time_ns: f64 = 0,
-    percent: f64 = 0,
-    percent_time: f64 = 0,
 
     fn init(io: std.Io, profiler: *Profiler, text: []const u8, include_percent: bool) ProfileItem {
         return .{
@@ -311,6 +197,95 @@ const ProfileItem = struct {
     }
 };
 
+fn shapeData(comptime shape_type: ShapeType, profile_data: anytype) ProfileFrame.ShapeData {
+    return .{
+        .shape_type = shape_type,
+        .count = profile_data.count,
+        .avg_size = profile_data.avg,
+        .min_size = profile_data.smallest,
+        .max_size = profile_data.largest,
+    };
+}
+
+fn captureShapeCounts(grid: anytype) ProfileFrame.Shapes {
+    const circles = grid.impl.circle_storage.getProfileData();
+    const rects = grid.impl.rect_storage.getProfileData();
+    const points = grid.impl.point_storage.getProfileData();
+
+    return .{
+        .total_count = circles.count + rects.count + points.count,
+        .circle = shapeData(.Circle, circles),
+        .rect = shapeData(.Rect, rects),
+        .point = shapeData(.Point, points),
+    };
+}
+
+fn cellData(shape_type: ?ShapeType, density: CellDensity.DensityData) ProfileFrame.CellData {
+    return .{
+        .shape_type = shape_type,
+        .avg_shapes_per_cell = density.total,
+        .empty_cells = @intFromFloat(density.empty),
+        .max_in_cell = @intFromFloat(density.max),
+    };
+}
+
+fn captureCellData(grid: anytype, cell_density: CellDensity) ProfileFrame.Cells {
+    return .{
+        .rows = grid.impl.rows,
+        .cols = grid.impl.cols,
+        .cell_size = grid.impl.cell_size,
+        .cell_mult = grid.cell_size_multiplier,
+        .cell_count = grid.impl.rows * grid.impl.cols,
+        .combined = cellData(null, cell_density.all_data),
+        .circle = cellData(.Circle, cell_density.circle_data),
+        .rect = cellData(.Rect, cell_density.rect_data),
+        .point = cellData(.Point, cell_density.point_data),
+    };
+}
+
+fn timingData(item: ProfileItem, relevant_sum: f64) ProfileFrame.TimingData {
+    const last_ns: ?f64 = if (item.hasResults()) item.last_time_ns else null;
+    const percent: ?f64 = if (item.include_percent and item.hasResults() and relevant_sum > 0)
+        (item.last_time_ns / relevant_sum) * 100
+    else
+        null;
+
+    return .{
+        .label = item.text,
+        .last_ns = last_ns,
+        .percent = percent,
+        .include_percent = item.include_percent,
+    };
+}
+
+fn captureDetectionData(grid: anytype) ProfileFrame.Detection {
+    const collision_counter: CollisionCounter = blk: {
+        if (!grid.impl.multi_threaded) break :blk grid.impl.collision_counter;
+
+        var attempts: f32 = 0;
+        var hits: f32 = 0;
+
+        for (grid.impl.workers) |*worker| {
+            attempts += worker.collision_counter.pressure;
+            hits += worker.collision_counter.hits;
+            worker.collision_counter.reset();
+        }
+        break :blk .{ .pressure = attempts, .hits = hits };
+    };
+
+    const pressure: f64 = @floatCast(collision_counter.pressure);
+    const hits: f64 = @floatCast(collision_counter.hits);
+    const missed: f64 = pressure - hits;
+    const hits_percent: f64 = if (pressure == 0) 0 else hits / pressure * 100;
+    const miss_percent: f64 = if (pressure == 0) 0 else missed / pressure * 100;
+
+    return .{
+        .query_pressure = pressure,
+        .detected = .{ .raw = hits, .percent = hits_percent },
+        .missed = .{ .raw = missed, .percent = miss_percent },
+    };
+}
+
 const CellDensity = struct {
     const DensityData = struct { total: f64 = 0, empty: f64 = 0, max: f64 = 0 };
 
@@ -318,10 +293,6 @@ const CellDensity = struct {
     circle_data: DensityData = .{},
     rect_data: DensityData = .{},
     point_data: DensityData = .{},
-
-    fn init() CellDensity {
-        return .{};
-    }
 
     fn setCellDensity(self: *CellDensity, grid: anytype) void {
         setShapeStorageDensity(grid.impl.circle_storage.counts, &self.circle_data);
@@ -392,43 +363,3 @@ const CellDensity = struct {
         };
     }
 };
-
-fn getCellCount(counts: []const u32, idx: usize) usize {
-    if (idx >= counts.len) return 0;
-    return if (idx == 0)
-        @intCast(counts[0])
-    else
-        @intCast(counts[idx] - counts[idx - 1]);
-}
-
-const ShapeCounts = @Struct(
-    .auto,
-    null,
-    blk: {
-        var names: [std.meta.tags(ShapeType).len][]const u8 = undefined;
-        for (std.meta.tags(ShapeType), 0..) |tag, i| {
-            names[i] = @tagName(tag);
-        }
-        break :blk &names;
-    },
-    &[_]type{usize} ** std.meta.tags(ShapeType).len,
-    &[_]std.builtin.Type.StructField.Attributes{.{}} ** std.meta.tags(ShapeType).len,
-);
-
-fn isShapeCountEql(shape_count_a: ShapeCounts, shape_count_b: ShapeCounts) bool {
-    inline for (std.meta.fields(ShapeCounts)) |field| {
-        const count_a = @field(shape_count_a, field.name);
-        const count_b = @field(shape_count_b, field.name);
-
-        if (count_a != count_b) return false;
-    }
-    return true;
-}
-
-fn getTotalCount(shape_counts: ShapeCounts) usize {
-    var total: usize = 0;
-    inline for (std.meta.fields(ShapeCounts)) |field| {
-        total += @field(shape_counts, field.name);
-    }
-    return total;
-}

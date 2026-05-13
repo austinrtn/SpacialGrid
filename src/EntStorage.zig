@@ -171,6 +171,14 @@ pub fn EntStorage(comptime shape_type: ShapeType, comptime PROFILING: bool) type
             return buf[0..len];
         }
 
+        pub fn query_cells(self: *Self, grid: anytype, cell_indexes: []usize, y: f32}, buf: u32) ![]u32 {
+            _ = self; _ = grid; _ = cells; _ = buf;
+            var len: usize = 0;
+            for(cells) |cell| {
+                const ents = self.getEntsFromCell()
+            }
+        }
+
         pub fn getLargestSize(self: *Self) f32 {
             var size: f32 = 0;
             switch (shape_type) {

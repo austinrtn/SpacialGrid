@@ -1,4 +1,7 @@
 const std = @import("std");
+const builtin = @import("builtin");
+const build = builtin.mode;
+
 const Attr = std.builtin.Type.StructField.Attributes;
 
 pub const BaseFields = [_][]const u8{ "ids", "xs", "ys" };
@@ -42,6 +45,13 @@ pub fn Insert(comptime SpacialGrid: type, comptime PROFILING: bool) type {
 
             pub fn many(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32, radii: []const f32) !void {
                 const grid = self.grid;
+
+                if(build == .Debug or build == .ReleaseSafe) {
+                    if(ids.len != xs.len or ids.len != ys.len or ids.len != radii.len) @panic(
+                        "All slice parameters must be of the same length!\n"
+                    );
+                }
+
                 if (grid.impl.has_updated) {
                     grid.reset();
                 }
@@ -56,6 +66,7 @@ pub fn Insert(comptime SpacialGrid: type, comptime PROFILING: bool) type {
             }
 
             pub fn mal(self: @This(), comptime field_map: InsertionFieldMap, circles_mal: anytype) !void {
+                if(circles_mal.len == 0) return;
                 const fields = BaseFields ++ CircleFields;
 
                 const Data = @Struct(
@@ -81,6 +92,12 @@ pub fn Insert(comptime SpacialGrid: type, comptime PROFILING: bool) type {
             }
 
             pub fn many(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32, widths: []const f32, heights: []const f32) !void {
+                if(build == .Debug or build == .ReleaseSafe) {
+                    if(ids.len != xs.len or ids.len != ys.len or ids.len != widths.len or ids.len != heights.len) @panic(
+                        "All slice parameters must be of the same length!\n"
+                    );
+                }
+
                 const grid = self.grid;
                 if (grid.impl.has_updated) {
                     grid.reset();
@@ -95,6 +112,7 @@ pub fn Insert(comptime SpacialGrid: type, comptime PROFILING: bool) type {
             }
 
             pub fn mal(self: @This(), comptime field_map: InsertionFieldMap, rect_mal: anytype) !void {
+                if(rect_mal.len == 0) return;
                 const fields = BaseFields ++ RectFields;
 
                 const Data = @Struct(
@@ -120,6 +138,12 @@ pub fn Insert(comptime SpacialGrid: type, comptime PROFILING: bool) type {
             }
 
             pub fn many(self: @This(), ids: []const u32, xs: []const f32, ys: []const f32) !void {
+                if(build == .Debug or build == .ReleaseSafe) {
+                    if(ids.len != xs.len or ids.len != ys.len) @panic(
+                        "All slice parameters must be of the same length!\n"
+                    );
+                }
+
                 const grid = self.grid;
                 if (grid.impl.has_updated) {
                     grid.reset();
@@ -135,8 +159,9 @@ pub fn Insert(comptime SpacialGrid: type, comptime PROFILING: bool) type {
             }
 
             pub fn mal(self: @This(), comptime field_map: InsertionFieldMap, point_mal: anytype) !void {
-                const fields = BaseFields;
+                if(point_mal.len == 0) return;
 
+                const fields = BaseFields;
                 const Data = @Struct(
                     .auto,
                     null,

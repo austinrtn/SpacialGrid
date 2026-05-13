@@ -4,10 +4,11 @@ const Vector2 = @import("Vector2.zig").Vector2;
 const Worker = @import("Worker.zig").Worker;
 const WorkQueueMod = @import("WorkQueue.zig");
 const WorkQueue = WorkQueueMod.WorkQueue;
-const Kernel =  WorkQueueMod.Kernel;
+const Kernel = WorkQueueMod.Kernel;
 const WorkItem = WorkQueueMod.WorkItem;
 
 const Insert = @import("Insert.zig").Insert;
+const QueryIndicesMod = @import("QueryIndices.zig");
 const ProfilerMod = @import("Profiler.zig");
 const Profiler = ProfilerMod.Profiler;
 const CollisionCounter = ProfilerMod.CollisionCounter;
@@ -52,6 +53,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
 
     return struct {
         const Self = @This();
+        const QueryIndices = QueryIndicesMod.QueryIndices(Self);
         pub const Vector2 = Vec2;
         pub const ShapeData = Shape;
 
@@ -210,13 +212,13 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                         const idx_b: usize = @intCast(idx_b_u32);
                         if (outer_shape == inner_shape and idx_a >= idx_b) continue;
 
-                        if(PROFILING) collision_counter.pressure += 1;
+                        if (PROFILING) collision_counter.pressure += 1;
 
                         const x_b = inner_storage.xs[idx_b];
                         const y_b = inner_storage.ys[idx_b];
                         const id_b = inner_storage.ids[idx_b];
 
-                        const pair: CollisionPair = .{ .a = id_a, .b = id_b, .kernel = work_item.kernel};
+                        const pair: CollisionPair = .{ .a = id_a, .b = id_b, .kernel = work_item.kernel };
                         var colliding: bool = false;
 
                         switch (outer_shape) {
@@ -268,7 +270,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                         }
 
                         if (colliding) col_list.append(self.allocator, pair) catch continue;
-                        if(PROFILING and colliding) collision_counter.hits += 1;
+                        if (PROFILING and colliding) collision_counter.hits += 1;
                     }
                 }
             }
@@ -504,13 +506,7 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                 if (PROFILING) profiler.timed_items.find_collision.start();
 
                 while (try self.impl.work_queue.getNextWorkItem(false)) |item| {
-                    self.impl.findCollisions(
-                        self,
-                        item,
-                        self.impl.query_buf,
-                        &self.results,
-                        &self.impl.collision_counter
-                    );
+                    self.impl.findCollisions(self, item, self.impl.query_buf, &self.results, &self.impl.collision_counter);
                 }
 
                 if (PROFILING) try profiler.timed_items.find_collision.stop();
@@ -636,41 +632,5 @@ pub fn SpacialGrid(comptime setup: Setup) type {
                 .Point = self.impl.point_storage.ent_count,
             });
         }
-
-        const QueryIndices = struct {
-            allocator: std.mem.Allocator,
-            c_buf: []u32,
-            c_indices: []u32,
-
-            r_buf: []u32,
-            r_indices: []u32,
-
-            p_buf: []u32,
-            p_indices: []u32,
-            total_count: usize = 0,
-
-            fn init(grid: *Self, x: f32, y: f32) !QueryIndices {
-                const allocator = grid.impl.allocator;
-                var self: QueryIndices = undefined;
-                self.allocator = allocator;
-
-                self.c_buf = try allocator.alloc(u32, grid.impl.circle_storage.ent_count);
-                self.r_buf = try allocator.alloc(u32, grid.impl.rect_storage.ent_count);
-                self.p_buf = try allocator.alloc(u32, grid.impl.point_storage.ent_count);
-
-                self.c_indices = try grid.impl.circle_storage.query(grid, x, y, self.c_buf);
-                self.r_indices = try grid.impl.rect_storage.query(grid, x, y, self.r_buf);
-                self.p_indices = try grid.impl.point_storage.query(grid, x, y, self.p_buf);
-
-                self.total_count = self.c_indices.len + self.r_indices.len + self.p_indices.len;
-                return self;
-            }
-
-            fn deinit(self: *QueryIndices) void {
-                self.allocator.free(self.c_buf);
-                self.allocator.free(self.r_buf);
-                self.allocator.free(self.p_buf);
-            }
-        };
     };
 }
