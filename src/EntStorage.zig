@@ -171,12 +171,15 @@ pub fn EntStorage(comptime shape_type: ShapeType, comptime PROFILING: bool) type
             return buf[0..len];
         }
 
-        pub fn query_cells(self: *Self, grid: anytype, cell_indexes: []usize, y: f32}, buf: u32) ![]u32 {
-            _ = self; _ = grid; _ = cells; _ = buf;
+        pub fn queryCells(self: *Self, cell_indexes: []const usize, buf: []u32) ![]u32 {
             var len: usize = 0;
-            for(cells) |cell| {
-                const ents = self.getEntsFromCell()
+            for (cell_indexes) |idx| {
+                const found_ents = self.getEntsFromCell(idx);
+                @memcpy(buf[len .. len + found_ents.len], found_ents);
+                len += found_ents.len;
             }
+
+            return buf[0..len];
         }
 
         pub fn getLargestSize(self: *Self) f32 {

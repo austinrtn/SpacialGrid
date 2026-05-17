@@ -440,8 +440,9 @@ pub fn SpacialGrid(comptime setup: Setup) type {
         pub fn query(self: *Self, x: f32, y: f32, shape_data: Shape) ![]u32 {
             const cd = CollisionDetection(Vec2);
             try self.ensureBuilt();
+            std.debug.print("Hello!\n", .{});
 
-            var queried_indices = try QueryIndices.init(self, x, y);
+            var queried_indices = try QueryIndices.initForShapeQuery(self, x, y, shape_data);
             defer queried_indices.deinit();
 
             const qr = &self.impl.query_results;
